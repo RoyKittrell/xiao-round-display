@@ -1,0 +1,3 @@
+# Preserve upstream source/license formatting without flagging inherited spaces.
+libraries/** -whitespace
+XiaoPlayground/assets/fonts/LICENSE.txt -whitespace

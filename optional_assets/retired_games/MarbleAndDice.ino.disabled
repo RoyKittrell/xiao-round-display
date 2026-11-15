@@ -1,0 +1,36 @@
+// Archived from sun-information-20261015-r8. Not included in active builds.
+// Original globals and input/rendering routines; depend on the main sketch's
+// cv, text(), colour constants, IMU values, Arduino and DoubleShake.h.
+#include "../../XiaoPlayground/DoubleShake.h"
+DoubleShake shake;
+int die=1;
+float x=120,y=120,vx=0,vy=0;
+uint32_t lastRoll=0,rollingUntil=0;
+// On scene entry: shake.reset(); x=y=120; vx=vy=0;
+void retiredDiceInput(){
+ if(mode==1&&imuOK&&accelerationFresh&&millis()-switched>1000){
+  float magnitude=sqrtf(ax*ax+ay*ay+az*az);
+  if(shake.update(magnitude,millis())>0){
+   rollingUntil=millis()+650;lastRoll=millis();
+  }
+ }
+}
+void marble(){
+ cv.drawCircle(120,120,110,0x4a69);cv.drawCircle(120,120,24,GOLD);
+ if(!imuOK){text(120,110,"IMU unavailable",1);return;}
+ vx=(vx-ay*1.1f)*0.96f;vy=(vy+ax*1.1f)*0.96f;x+=vx;y+=vy;
+ float dx=x-120,dy=y-120,r=sqrtf(dx*dx+dy*dy);
+ if(r>99){x=120+dx*99/r;y=120+dy*99/r;float dot=(vx*dx+vy*dy)/r;vx-=1.7f*dot*dx/r;vy-=1.7f*dot*dy/r;}
+ cv.fillCircle(x,y,10,CYAN);cv.fillCircle(x-3,y-3,3,WHITE);
+
+}
+void dice(){
+ if(millis()<rollingUntil)die=random(1,7);
+ cv.fillRoundRect(42,42,156,156,22,WHITE);
+ int p[7][2]={{120,120},{77,77},{163,163},{163,77},{77,163},{77,120},{163,120}};
+ if(die&1)cv.fillCircle(p[0][0],p[0][1],10,BG);
+ if(die>=2){cv.fillCircle(77,77,10,BG);cv.fillCircle(163,163,10,BG);}
+ if(die>=4){cv.fillCircle(163,77,10,BG);cv.fillCircle(77,163,10,BG);}
+ if(die==6){cv.fillCircle(77,120,10,BG);cv.fillCircle(163,120,10,BG);}
+
+}

@@ -1,0 +1,389 @@
+import AppKit
+import Foundation
+import Darwin
+import Dispatch
+
+struct Scene: Codable { let id: Int; let name: String }
+let helperName="XIAO Display Helper"
+let dataRoot=ProcessInfo.processInfo.environment["XIAO_DISPLAY_DATA_DIR"].map{URL(fileURLWithPath:$0)} ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/\(helperName)")
+let prefsURL=dataRoot.appendingPathComponent("display-preferences.json")
+let statusURL=dataRoot.appendingPathComponent("control-status.json")
+let displayTimezone:TimeZone={
+    let settings=object(dataRoot.appendingPathComponent("settings.json"))
+    let minutes=settings["utc_offset_minutes"] as? Int ?? 0
+    return TimeZone(secondsFromGMT:((-720...840).contains(minutes) ? minutes:0)*60)!
+}()
+let healthURL=dataRoot.appendingPathComponent("helper-status.json")
+let decoder:JSONDecoder={let d=JSONDecoder();d.keyDecodingStrategy = .convertFromSnakeCase;return d}()
+let encoder:JSONEncoder={let e=JSONEncoder();e.keyEncodingStrategy = .convertToSnakeCase;e.outputFormatting=[.prettyPrinted,.sortedKeys];return e}()
+func object(_ url:URL)->[String:Any] { guard let data=try? Data(contentsOf:url),let value=try? JSONSerialization.jsonObject(with:data) as? [String:Any] else{return [:]};return value }
+extension NSTextField {
+    func show(_ value:String){if stringValue != value{stringValue=value}}
+}
+
+final class SliderBox:NSView {
+    let slider:NSSlider
+    let label=NSTextField(labelWithString:"")
+    let feedback=NSTextField(labelWithString:"")
+    init(value:Int,target:AnyObject,action:Selector,enabled:Bool){
+        slider=NSSlider(value:Double(value),minValue:0,maxValue:100,target:target,action:action)
+        super.init(frame:NSRect(x:0,y:0,width:250,height:78))
+        label.frame=NSRect(x:16,y:53,width:220,height:18);label.font=NSFont.menuFont(ofSize:12);label.stringValue="Brightness · \(value)%"
+        slider.frame=NSRect(x:16,y:28,width:218,height:24);slider.isContinuous=true;slider.isEnabled=enabled
+        feedback.frame=NSRect(x:16,y:6,width:220,height:17);feedback.font=NSFont.menuFont(ofSize:11);feedback.textColor = .secondaryLabelColor
+        slider.setAccessibilityLabel("Display brightness");addSubview(label);addSubview(slider);addSubview(feedback)
+    }
+    required init?(coder:NSCoder){fatalError()}
+}
+
+// Native menu-item actions dismiss their menu. Controls embedded in a view
+// handle clicks themselves, allowing several checkbox changes in one visit.
+final class CarouselChecklist:NSView {
+    var buttons:[NSButton]=[]
+    let allButton=NSButton(),note=NSTextField(labelWithString:"")
+    let allMask:Int
+    private var lastMask:Int?
+    let onToggle:(Int)->Void, onDone:()->Void
+    override var isFlipped:Bool {true}
+    init(scenes:[Scene],mask:Int,onToggle:@escaping(Int)->Void,onDone:@escaping()->Void){
+        self.onToggle=onToggle;self.onDone=onDone
+        allMask=scenes.reduce(0){$0 | (1 << ($1.id-2))}
+        super.init(frame:NSRect(x:0,y:0,width:270,height:CGFloat(scenes.count*26+92)))
+        allButton.setButtonType(.switch);allButton.title="All";allButton.allowsMixedState=true
+        allButton.target=self;allButton.action=#selector(toggle(_:));allButton.tag = -1
+        allButton.font=NSFont.menuFont(ofSize:13);allButton.frame=NSRect(x:14,y:8,width:242,height:24);addSubview(allButton)
+        let separator=NSBox();separator.boxType = .separator;separator.frame=NSRect(x:14,y:38,width:242,height:1);addSubview(separator)
+        for (index,scene) in scenes.enumerated(){
+            let button=NSButton(checkboxWithTitle:scene.name,target:self,action:#selector(toggle(_:)))
+            button.tag=scene.id;button.font=NSFont.menuFont(ofSize:13)
+            button.frame=NSRect(x:14,y:CGFloat(48+index*26),width:242,height:24)
+            buttons.append(button);addSubview(button)
+        }
+        note.font=NSFont.menuFont(ofSize:11);note.textColor = .secondaryLabelColor
+        note.frame=NSRect(x:14,y:CGFloat(scenes.count*26+60),width:165,height:17);addSubview(note)
+        let done=NSButton(title:"Done",target:self,action:#selector(finish(_:)));done.bezelStyle = .rounded
+        done.frame=NSRect(x:187,y:CGFloat(scenes.count*26+52),width:70,height:28);addSubview(done)
+        update(mask:mask)
+    }
+    required init?(coder:NSCoder){fatalError()}
+    func update(mask:Int){
+        guard mask != lastMask else{return};lastMask=mask
+        let allState:NSControl.StateValue=mask==allMask ? .on:mask==0 ? .off:.mixed
+        if allButton.state != allState{allButton.state=allState}
+        note.show(mask==0 ? "None selected · paused":"Changes save immediately")
+        for button in buttons {
+            let selected=mask & (1 << (button.tag-2)) != 0
+            let state:NSControl.StateValue=selected ? .on:.off
+            if button.state != state{button.state=state}
+        }
+    }
+    @objc func toggle(_ sender:NSButton){onToggle(sender.tag)}
+    @objc func finish(_ sender:NSButton){onDone()}
+}
+
+final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
+    var item:NSStatusItem!,menu=NSMenu(),child:Process?,timer:Timer?
+    var prefs=Preferences(),scenes:[Scene]=[],device:[String:Any]=[:],health:[String:Any]=[:]
+    var quitting=false,sliderBox:SliderBox?
+    var signalSources:[DispatchSourceSignal]=[]
+    var pendingBrightnessRevision:UInt32?,pendingBrightnessValue:Int?,pendingBrightnessProfile:String?
+    var profileStore:ProfileStore?
+    var carouselChecklist:CarouselChecklist?
+    let stateQueue=DispatchQueue(label:"org.xiaodisplay.menu-state",qos:.utility)
+    var stateReadPending=false,menuIsOpen=false,lastMenuSignature="",profileMenuGeneration=0
+    var sourceEntries:[String:NSMenuItem]=[:]
+    var connected:Bool {
+        let timestamp=health["updated_at"] as? Double ?? 0
+        return (health["usb_connected"] as? Bool ?? false) && Date().timeIntervalSince1970-timestamp<20
+    }
+    var currentScene:Int { device["scene"] as? Int ?? prefs.selectedScene }
+    var actualNight:Bool {
+        if prefs.appearance==1{return false};if prefs.appearance==2{return true}
+        var c=Calendar(identifier:.gregorian);c.timeZone=displayTimezone
+        let parts=c.dateComponents([.hour,.minute],from:Date());let minute=(parts.hour ?? 0)*60+(parts.minute ?? 0)
+        return minute>=1020 || minute<450
+    }
+    var actualBrightness:Int {
+        if connected,device["error"]==nil,let v=device[actualNight ? "night_brightness":"day_brightness"] as? Int{return v}
+        return 0 // Startup/reconnect stays dark until an explicit user action.
+    }
+    func applicationDidFinishLaunching(_ notification:Notification){
+        let catalog=Bundle.main.resourceURL!.appendingPathComponent("companion/scenes.json")
+        scenes=(try? decoder.decode([Scene].self,from:Data(contentsOf:catalog))) ?? []
+        if CommandLine.arguments.contains("--menu-dump"){
+            let tree:[String:Any]=["name":helperName,"scenes":scenes.map{$0.name},"profiles":["Saved profiles","Save Current Settings as Profile…","Delete Profile"],"playback":["Carousel","Stay on selected scene"],"intervals":[1,5,10,15,30,60],"brightness":"0–100% slider; startup always0%","power":["Automatic schedule","Always on","Screen off"]]
+            if let d=try? JSONSerialization.data(withJSONObject:tree,options:.prettyPrinted){print(String(data:d,encoding:.utf8)!)}
+            NSApp.terminate(nil);return
+        }
+        installStopHandlers()
+        NSApp.setActivationPolicy(.accessory)
+        do{profileStore=try ProfileStore(url:dataRoot.appendingPathComponent("display-profiles.json"))}
+        catch{showError("Could not load profiles. Your saved file has been left untouched. \(error.localizedDescription)")}
+        load();item=NSStatusBar.system.statusItem(withLength:NSStatusItem.squareLength)
+        if let button=item.button {
+            button.image=NSImage(systemSymbolName:"circle.dotted.circle",accessibilityDescription:"XIAO display controls")
+            button.image?.isTemplate=true;button.toolTip="XIAO Round Display"
+        }
+        menu.autoenablesItems=false;menu.delegate=self;item.menu=menu
+        startWorker()
+        timer=Timer(timeInterval:0.5,repeats:true){[weak self] _ in self?.pollState()}
+        RunLoop.main.add(timer!,forMode:.common)
+        rebuild()
+    }
+    func startWorker(){
+        let python=Bundle.main.object(forInfoDictionaryKey:"XIAOPythonPath") as? String ?? ""
+        let script=Bundle.main.resourceURL!.appendingPathComponent("companion/display_bridge.py")
+        let process=Process();process.executableURL=URL(fileURLWithPath:python);process.arguments=["-B","-u",script.path]
+        var env=ProcessInfo.processInfo.environment;env["XIAO_DISPLAY_DATA_DIR"]=dataRoot.path;env["PYTHONDONTWRITEBYTECODE"]="1";env["XIAO_MENU_OWNER_PID"]=String(getpid());process.environment=env
+        process.currentDirectoryURL=dataRoot;process.standardOutput=FileHandle.standardOutput;process.standardError=FileHandle.standardError
+        process.terminationHandler={[weak self] _ in DispatchQueue.main.async{if self?.quitting==false{NSApp.terminate(nil)}}}
+        do{try process.run();child=process}catch{showError("Could not start the data helper: \(error.localizedDescription)")}
+    }
+    func installStopHandlers(){
+        for number in [SIGTERM,SIGINT] {
+            signal(number,SIG_IGN)
+            let source=DispatchSource.makeSignalSource(signal:number,queue:.main)
+            source.setEventHandler{[weak self] in self?.shutdown(unload:false)}
+            source.resume();signalSources.append(source)
+        }
+    }
+    func signalWorker(_ number:Int32){
+        guard let process=child,process.isRunning else{return}
+        let pid=process.processIdentifier
+        if getpgid(pid)==pid && pid != getpgrp(){kill(-pid,number)}else{kill(pid,number)}
+    }
+    func shutdown(unload:Bool){
+        if quitting{return};quitting=true;timer?.invalidate();signalWorker(SIGTERM)
+        let worker=child
+        DispatchQueue.global().async{[weak self] in
+            let deadline=Date().addingTimeInterval(2)
+            while worker?.isRunning==true && Date()<deadline{Thread.sleep(forTimeInterval:0.05)}
+            if worker?.isRunning==true{self?.signalWorker(SIGKILL)}
+            if worker != nil{worker?.waitUntilExit()}
+            DispatchQueue.main.async{
+                if unload {
+                    let p=Process();p.executableURL=URL(fileURLWithPath:"/bin/launchctl");p.arguments=["bootout","gui/\(getuid())/org.xiaodisplay.helper"];try? p.run()
+                    DispatchQueue.main.asyncAfter(deadline:.now()+0.3){NSApp.terminate(nil)}
+                }else{NSApp.terminate(nil)}
+            }
+        }
+    }
+    func updateBrightnessFeedback(){
+        guard let box=sliderBox else{return}
+        if !connected{box.feedback.show("USB not connected or configured");return}
+        if device["error"] != nil{box.feedback.show("Waiting for display confirmation");return}
+        let off=(device["sleeping"] as? Int ?? 0)==1
+        if let revision=pendingBrightnessRevision,let target=pendingBrightnessValue {
+            if (device["revision"] as? UInt32 ?? 0)>=revision {
+                let actual=device[pendingBrightnessProfile ?? "day_brightness"] as? Int ?? 0
+                box.feedback.show(actual==target ? (off ? "Screen off · level \(actual)%":"Display confirmed \(actual)%") : "Display: \(actual)% · adjust slider again")
+                pendingBrightnessRevision=nil;pendingBrightnessValue=nil;pendingBrightnessProfile=nil
+            }else{box.feedback.show("Applying \(target)%…")}
+        }else{
+            let actual=actualBrightness
+            if box.slider.doubleValue != Double(actual){box.slider.doubleValue=Double(actual)}
+            box.label.show("Brightness · \(actual)% · \(actualNight ? "night":"day")")
+            box.feedback.show(off ? "Screen off · level \(actual)%":"Display: \(actual)%")
+        }
+    }
+    func pollState(){
+        guard !stateReadPending,!quitting else{return};stateReadPending=true
+        let revisionWhenRequested=prefs.revision
+        stateQueue.async{[weak self] in
+            let reader=JSONDecoder();reader.keyDecodingStrategy = .convertFromSnakeCase
+            let saved=(try? Data(contentsOf:prefsURL)).flatMap{try? reader.decode(Preferences.self,from:$0)}
+            let deviceState=object(statusURL),workerState=object(healthURL)
+            DispatchQueue.main.async{
+                guard let self=self else{return};self.stateReadPending=false
+                // A slow read must never overwrite a more recent checkbox,
+                // profile or slider action performed while it was in flight.
+                if self.prefs.revision==revisionWhenRequested,let saved=saved{self.prefs=saved}
+                self.device=deviceState;self.health=workerState
+                self.carouselChecklist?.update(mask:self.prefs.enabledMask);self.updateTip()
+                if self.menuIsOpen{self.updateBrightnessFeedback();self.refreshSourceItems()}
+                self.prepareMenuIfNeeded()
+            }
+        }
+    }
+    func load(){
+        if let data=try? Data(contentsOf:prefsURL),let value=try? decoder.decode(Preferences.self,from:data){prefs=value}
+        device=object(statusURL);health=object(healthURL)
+        carouselChecklist?.update(mask:prefs.enabledMask)
+    }
+    @discardableResult func save()->Bool {
+        prefs.revision = prefs.revision == UInt32.max ? 1:prefs.revision+1
+        do{try FileManager.default.createDirectory(at:dataRoot,withIntermediateDirectories:true);try encoder.encode(prefs).write(to:prefsURL,options:.atomic);return true}catch{showError("Could not save display settings: \(error.localizedDescription)");return false}
+    }
+    func updateTip(){
+        let name=scenes.first{$0.id==currentScene}?.name ?? "Display"
+        let tip=connected ? "XIAO Display · \(name)":"XIAO Display · USB disconnected"
+        if item?.button?.toolTip != tip{item?.button?.toolTip=tip}
+    }
+    var menuSignature:String {
+        [String(prefs.revision),String(currentScene),String(connected),String(actualNight),
+         String(device["sleeping"] as? Int ?? -1),String(device["revision"] as? UInt32 ?? 0),
+         String(device["day_brightness"] as? Int ?? -1),String(device["night_brightness"] as? Int ?? -1),
+         device["error"] as? String ?? "",String(profileMenuGeneration)].joined(separator:"|")
+    }
+    func prepareMenuIfNeeded(){if !menuIsOpen && menuSignature != lastMenuSignature{rebuild()}}
+    func menuWillOpen(_ menu:NSMenu){menuIsOpen=true;updateBrightnessFeedback();refreshSourceItems()}
+    func menuDidClose(_ menu:NSMenu){
+        menuIsOpen=false
+        DispatchQueue.main.async{[weak self] in self?.prepareMenuIfNeeded()}
+    }
+    @discardableResult func add(_ title:String,to target:NSMenu?=nil,action:Selector?=nil,tag:Int=0,checked:Bool=false,enabled:Bool=true)->NSMenuItem{
+        let entry=NSMenuItem(title:title,action:action,keyEquivalent:"");entry.target=self;entry.tag=tag;entry.state=checked ? .on:.off;entry.isEnabled=enabled;(target ?? menu).addItem(entry);return entry
+    }
+    func submenu(_ title:String)->NSMenu{let m=NSMenu();m.autoenablesItems=false;add(title).submenu=m;return m}
+    func rebuild(){
+        menu.removeAllItems();add("XIAO Round Display",enabled:false)
+        let current=scenes.first{$0.id==currentScene}?.name ?? "Ready"
+        add(connected ? "Connected · \(current)":"USB disconnected · changes will queue",enabled:false)
+        if connected,(device["revision"] as? UInt32 ?? 0) != prefs.revision{add("Applying settings…",enabled:false)}
+        if device["error"] is String{add("Waiting for display controls",enabled:false)}
+        menu.addItem(.separator())
+        let picker=submenu("Scenes")
+        for scene in scenes{add(scene.name,to:picker,action:#selector(selectScene(_:)),tag:scene.id,checked:currentScene==scene.id)}
+        let included=submenu("Include in Carousel")
+        let checklist=CarouselChecklist(scenes:scenes,mask:prefs.enabledMask,onToggle:{[weak self] id in self?.toggleCarouselScene(id)},onDone:{[weak self] in self?.menu.cancelTracking()})
+        let checklistItem=NSMenuItem();checklistItem.view=checklist;included.addItem(checklistItem);carouselChecklist=checklist
+        let playback=submenu("Playback")
+        add(prefs.enabledMask==0 ? "Carousel · paused (no scenes)":"Carousel",to:playback,action:#selector(playbackMode(_:)),tag:1,checked:prefs.carousel)
+        add("Stay on selected scene",to:playback,action:#selector(playbackMode(_:)),tag:0,checked: !prefs.carousel)
+        let interval=NSMenu();interval.autoenablesItems=false;add("Change scene every",to:playback).submenu=interval
+        for minute in [1,5,10,15,30,60]{add("\(minute) minute\(minute==1 ? "":"s")",to:interval,action:#selector(changeInterval(_:)),tag:minute*60,checked:prefs.intervalSeconds==minute*60)}
+        let profiles=submenu("Profiles")
+        if let store=profileStore {
+            if store.library.profiles.isEmpty{add("No saved profiles yet",to:profiles,enabled:false)}
+            let snapshot=currentProfileSettings()
+            for profile in store.library.profiles {
+                let entry=add(profile.name,to:profiles,action:#selector(chooseProfile(_:)),checked:store.library.selectedProfileId==profile.id && profile.settings.matches(snapshot))
+                entry.representedObject=profile.id
+            }
+            profiles.addItem(.separator())
+            add("Save Current Settings as Profile…",to:profiles,action:#selector(saveProfile(_:)))
+            if !store.library.profiles.isEmpty {
+                let deletion=NSMenu();deletion.autoenablesItems=false;add("Delete Profile",to:profiles).submenu=deletion
+                for profile in store.library.profiles {
+                    let entry=add(profile.name,to:deletion,action:#selector(deleteProfile(_:)));entry.representedObject=profile.id
+                }
+            }
+        }else{add("Profiles unavailable · saved file needs attention",to:profiles,enabled:false)}
+        menu.addItem(.separator())
+        let brightness=NSMenuItem();let box=SliderBox(value:actualBrightness,target:self,action:#selector(brightness(_:)),enabled:connected && device["boot_id"] != nil);box.label.stringValue="Brightness · \(actualBrightness)% · \(actualNight ? "night":"day")";brightness.view=box;sliderBox=box;menu.addItem(brightness);updateBrightnessFeedback()
+        let appearance=submenu("Appearance")
+        for (i,name) in ["Automatic · 17:00–07:30 night","Day","Night"].enumerated(){add(name,to:appearance,action:#selector(changeAppearance(_:)),tag:i,checked:prefs.appearance==i)}
+        let off=(device["sleeping"] as? Int ?? (prefs.power==2 ? 1:0))==1
+        add(off ? "Turn Screen On":"Turn Screen Off",action:#selector(toggleScreen(_:)))
+        let power=submenu("Power")
+        for (i,name) in ["Automatic · sleep 01:00–07:00","Always on","Screen off"].enumerated(){add(name,to:power,action:#selector(changePower(_:)),tag:i,checked:prefs.power==i)}
+        let sources=submenu("Data Sources")
+        sourceEntries.removeAll()
+        for key in ["codex","bambu","sun"]{
+            if let title=sourceTitle(key){sourceEntries[key]=add(title,to:sources,enabled:false)}
+        }
+        menu.addItem(.separator());add("Quit Helper",action:#selector(quitHelper(_:)))
+        lastMenuSignature=menuSignature
+    }
+    func sourceTitle(_ key:String)->String? {
+        guard let values=health["sources"] as? [String:[String:Any]],let value=values[key] else{return nil}
+        let label=value["label"] as? String ?? key
+        let delivered=value["source_observed_at"] as? Double ?? value["last_fetched_at"] as? Double ?? 0
+        let age=max(0,Int(Date().timeIntervalSince1970-delivered))
+        let status=delivered==0 ? "Waiting":age<60 ? "Updated \(age)s ago":"Updated \(age/60)m ago"
+        return "\(label) · \(status)"
+    }
+    func refreshSourceItems(){
+        for (key,entry) in sourceEntries{if let title=sourceTitle(key),entry.title != title{entry.title=title}}
+    }
+    @objc func selectScene(_ sender:NSMenuItem){load();prefs.selectedScene=sender.tag;prefs.selectionToken=prefs.selectionToken==UInt32.max ? 1:prefs.selectionToken+1;save()}
+    func toggleCarouselScene(_ id:Int){
+        load();guard id == -1 || scenes.contains(where:{$0.id==id}) else{return}
+        let all=scenes.reduce(0){$0 | (1 << ($1.id-2))}
+        prefs.enabledMask=id == -1 ? (prefs.enabledMask==all ? 0:all):prefs.enabledMask ^ (1 << (id-2))
+        if !save(){load()}
+        carouselChecklist?.update(mask:prefs.enabledMask)
+    }
+    @objc func playbackMode(_ sender:NSMenuItem){
+        load();prefs.carousel=sender.tag==1
+        if !prefs.carousel {
+            let scene=currentScene;prefs.selectedScene=scenes.contains{$0.id==scene} ? scene:2
+            prefs.selectionToken=prefs.selectionToken==UInt32.max ? 1:prefs.selectionToken+1
+        };save()
+    }
+    @objc func changeInterval(_ sender:NSMenuItem){load();prefs.intervalSeconds=sender.tag;save()}
+    @objc func changeAppearance(_ sender:NSMenuItem){load();prefs.appearance=sender.tag;save()}
+    @objc func changePower(_ sender:NSMenuItem){load();prefs.power=sender.tag;save()}
+    func currentProfileSettings()->ProfileSettings {
+        let fresh=connected && device["error"]==nil && (device["revision"] as? UInt32)==prefs.revision
+        let scene=fresh ? currentScene:((2...10).contains(prefs.selectedScene) ? prefs.selectedScene:currentScene)
+        return ProfileSettings(prefs,currentScene:scene,day:fresh ? device["day_brightness"] as? Int:nil,night:fresh ? device["night_brightness"] as? Int:nil)
+    }
+    @objc func chooseProfile(_ sender:NSMenuItem){
+        guard let store=profileStore,let id=sender.representedObject as? String,let profile=store.library.profiles.first(where:{$0.id==id}) else{return}
+        load()
+        let applyBrightness=connected && device["error"]==nil && device["boot_id"] != nil
+        prefs=profile.settings.applying(to:prefs,applyBrightness:applyBrightness)
+        guard save() else{return}
+        if applyBrightness {
+            pendingBrightnessRevision=prefs.revision;pendingBrightnessValue=actualNight ? prefs.nightBrightness:prefs.dayBrightness
+            pendingBrightnessProfile=actualNight ? "night_brightness":"day_brightness"
+        }
+        do{try store.select(id);profileMenuGeneration+=1}catch{showError("Settings applied, but the selected profile could not be saved: \(error.localizedDescription)")}
+    }
+    @objc func saveProfile(_ sender:NSMenuItem){
+        guard let store=profileStore else{return};load();let snapshot=currentProfileSettings()
+        let alert=NSAlert();alert.messageText="Save Current Settings as Profile"
+        alert.informativeText="Save the included scenes, playback, interval, appearance, brightness and power settings."
+        alert.addButton(withTitle:"Save Profile");alert.addButton(withTitle:"Cancel")
+        let field=NSTextField(frame:NSRect(x:0,y:0,width:300,height:24));field.placeholderString="Profile name, e.g. Work"
+        alert.accessoryView=field;alert.window.initialFirstResponder=field;NSApp.activate(ignoringOtherApps:true)
+        while alert.runModal() == .alertFirstButtonReturn {
+            do{
+                let name=try ProfileStore.cleanName(field.stringValue)
+                if let existing=store.named(name) {
+                    let replace=NSAlert();replace.messageText="Replace “\(existing.name)”?";replace.informativeText="Its saved settings will be replaced with the current settings."
+                    replace.addButton(withTitle:"Replace");replace.addButton(withTitle:"Cancel")
+                    if replace.runModal() != .alertFirstButtonReturn{continue}
+                }
+                try store.save(name:name,settings:snapshot);profileMenuGeneration+=1;return
+            }catch{alert.informativeText=error.localizedDescription}
+        }
+    }
+    @objc func deleteProfile(_ sender:NSMenuItem){
+        guard let store=profileStore,let id=sender.representedObject as? String,let profile=store.library.profiles.first(where:{$0.id==id}) else{return}
+        let alert=NSAlert();alert.messageText="Delete “\(profile.name)”?";alert.informativeText="This removes the saved profile. Your current settings and all scenes are kept."
+        alert.addButton(withTitle:"Delete Profile");alert.addButton(withTitle:"Cancel");NSApp.activate(ignoringOtherApps:true)
+        if alert.runModal() == .alertFirstButtonReturn{do{try store.delete(id);profileMenuGeneration+=1}catch{showError(error.localizedDescription)}}
+    }
+    @objc func toggleScreen(_ sender:NSMenuItem){
+        load();let off=(device["sleeping"] as? Int ?? 0)==1
+        if off {
+            var c=Calendar(identifier:.gregorian);c.timeZone=displayTimezone
+            let hour=c.component(.hour,from:Date());prefs.power=(hour>=1 && hour<7) ? 1:0
+        }else{prefs.power=2};save()
+    }
+    @objc func brightness(_ sender:NSSlider){
+        load();let value=Int(sender.doubleValue.rounded())
+        // Preserve the other profile's real current value, not an old saved level.
+        prefs.dayBrightness=device["day_brightness"] as? Int ?? 0;prefs.nightBrightness=device["night_brightness"] as? Int ?? 0
+        if actualNight{prefs.nightBrightness=value}else{prefs.dayBrightness=value}
+        prefs.brightnessToken=prefs.brightnessToken==UInt32.max ? 1:prefs.brightnessToken+1;save()
+        pendingBrightnessRevision=prefs.revision;pendingBrightnessValue=value;pendingBrightnessProfile=actualNight ? "night_brightness":"day_brightness"
+        sliderBox?.label.stringValue="Brightness · \(value)%";sliderBox?.feedback.stringValue="Applying \(value)%…"
+    }
+    func showError(_ message:String){let alert=NSAlert();alert.messageText="XIAO Display";alert.informativeText=message;alert.runModal()}
+    @objc func quitHelper(_ sender:NSMenuItem){shutdown(unload:true)}
+    func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply {
+        if quitting{return .terminateNow};shutdown(unload:false);return .terminateCancel
+    }
+    func applicationWillTerminate(_ notification:Notification){quitting=true;timer?.invalidate();signalWorker(SIGTERM)}
+
+}
+@main struct HelperMain {
+    static func main(){
+        if CommandLine.arguments.contains("--version"){print("XIAO Display Helper 2.1.3");return}
+        let app=NSApplication.shared
+        let delegate=AppDelegate();app.delegate=delegate;withExtendedLifetime(delegate){app.run()}
+    }
+}
