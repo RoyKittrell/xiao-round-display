@@ -44,7 +44,10 @@ Synthetic fixtures belong in tests and must be labelled as such.
 Keep renderers separate from fetch adapters. New sources use the allowlisted
 factory registry, bounded packet parsers and the single USB dispatcher; no UI
 opens a competing serial connection. Preserve CRC checking, stale timestamps,
-unknown-value indicators, startup0% brightness and idempotent controls.
+unknown-value indicators, startup60% brightness after first-frame blanking and
+idempotent controls. Enable KE switch2 physically for D6/backlight control; a
+software acknowledgement alone cannot verify physical dimming. Keep true0%,
+screen-off behavior and the no-cached-brightness-replay rule.
 
 Before sharing changes: run offline tests and the privacy audit, inspect
 `git diff --cached`, and verify local configuration/cache files remain ignored.

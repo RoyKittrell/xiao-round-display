@@ -6,7 +6,7 @@ brightness automatically after helper startup, reconnect or device reset.
 from pathlib import Path
 import binascii,json,time
 DEFAULTS={'schema_version':1,'revision':1,'enabled_mask':511,'carousel':True,'interval_seconds':900,
-          'day_brightness':0,'night_brightness':0,'appearance':0,'power':0,
+          'day_brightness':60,'night_brightness':60,'appearance':0,'power':0,
           'selected_scene':-1,'selection_token':0,'brightness_token':0}
 
 def validate(value):

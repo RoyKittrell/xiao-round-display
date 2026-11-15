@@ -4,7 +4,7 @@ import json,sys,tempfile,subprocess,binascii,unittest
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'companion'))
 import display_control as c
 class Port:
- def __init__(self,boot=123):self.sent=[];self.boot=boot;self.response=[];self.revision=0;self.day=0;self.night=0
+ def __init__(self,boot=123):self.sent=[];self.boot=boot;self.response=[];self.revision=0;self.day=60;self.night=60
  def write(self,p):
   self.sent.append(p);f=p[1:-1].decode().split('|')
   if int(f[2])!=self.revision:
@@ -21,13 +21,19 @@ class Controls(unittest.TestCase):
  def test_brightness_is_explicit_and_not_replayed(self):
   with tempfile.TemporaryDirectory() as tmp:
    root=Path(tmp);p={**c.DEFAULTS,'day_brightness':80,'brightness_token':4};c.atomic(root/'display-preferences.json',p)
-   driver=c.Control(root);port=Port();driver.send(port)
+   driver=c.Control(root);port=Port();initial=driver.send(port)
+   self.assertEqual((initial['day_brightness'],initial['night_brightness']),(60,60))
    self.assertEqual(port.sent[-1].decode().split('|')[-3],'0') # applyBrightness false at startup.
    p.update(revision=2,brightness_token=5,day_brightness=10);c.atomic(driver.path,p);driver.poll();driver.send(port)
    self.assertEqual(port.sent[-1].decode().split('|')[-3],'1');self.assertEqual(port.sent[-1].decode().split('|')[-2],'123')
    driver.next_send=0;driver.send(port);self.assertEqual(port.sent[-1].decode().split('|')[-3],'0')
    p.update(revision=3,brightness_token=6);c.atomic(driver.path,p);driver.poll();driver.reconnect();driver.send(port)
    self.assertEqual(port.sent[-1].decode().split('|')[-3],'0')
+ def test_cached_zero_does_not_black_out_default_boot(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   root=Path(tmp);c.atomic(root/'display-preferences.json',{**c.DEFAULTS,'day_brightness':0,'night_brightness':0,'brightness_token':9})
+   driver=c.Control(root);result=driver.send(Port())
+   self.assertEqual((result['day_brightness'],result['night_brightness']),(60,60))
  def test_slider_action_before_first_ack_is_not_lost(self):
   with tempfile.TemporaryDirectory() as tmp:
    driver=c.Control(Path(tmp));port=Port()
@@ -52,7 +58,7 @@ code=r'''
 #include <string>
 int main(){
  SceneControl control;SceneControl::Settings value;
- assert(control.parse(PACKET,value));assert(value.mask==511&&value.day==0&&value.night==0&&!value.brightness);
+ assert(control.parse(PACKET,value));assert(value.mask==511&&value.day==60&&value.night==60&&!value.brightness);
  assert(control.next(10)==2);value.mask=257;value.revision=2;control.apply(value);assert(control.next(2)==10&&control.next(10)==2);
  assert(control.parse(EMPTY_CONTROL,value)&&value.mask==0);value.revision=3;control.apply(value);
  for(int scene=2;scene<=10;scene++)assert(control.next(scene)==scene);

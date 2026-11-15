@@ -25,7 +25,7 @@ import Foundation
         assert(applied.enabledMask==384 && applied.carousel && applied.intervalSeconds==300 && applied.selectedScene==9)
         assert(applied.appearance==2 && applied.power==1 && applied.dayBrightness==40 && applied.nightBrightness==5)
         let offline=snapshot.applying(to:changed,applyBrightness:false)
-        assert(offline.brightnessToken==99 && offline.dayBrightness==0 && offline.nightBrightness==0)
+        assert(offline.brightnessToken==99 && offline.dayBrightness==60 && offline.nightBrightness==60)
         // Carousel progress must not uncheck the active profile; hold differs.
         assert(snapshot.matches(ProfileSettings(applied,currentScene:10)))
         var held=snapshot;held.carousel=false

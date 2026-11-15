@@ -105,13 +105,13 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     }
     var actualBrightness:Int {
         if connected,device["error"]==nil,let v=device[actualNight ? "night_brightness":"day_brightness"] as? Int{return v}
-        return 0 // Startup/reconnect stays dark until an explicit user action.
+        return 60 // Show the firmware startup default until a device reading arrives.
     }
     func applicationDidFinishLaunching(_ notification:Notification){
         let catalog=Bundle.main.resourceURL!.appendingPathComponent("companion/scenes.json")
         scenes=(try? decoder.decode([Scene].self,from:Data(contentsOf:catalog))) ?? []
         if CommandLine.arguments.contains("--menu-dump"){
-            let tree:[String:Any]=["name":helperName,"scenes":scenes.map{$0.name},"profiles":["Saved profiles","Save Current Settings as Profile…","Delete Profile"],"playback":["Carousel","Stay on selected scene"],"intervals":[1,5,10,15,30,60],"brightness":"0–100% slider; startup always0%","power":["Automatic schedule","Always on","Screen off"]]
+            let tree:[String:Any]=["name":helperName,"scenes":scenes.map{$0.name},"profiles":["Saved profiles","Save Current Settings as Profile…","Delete Profile"],"playback":["Carousel","Stay on selected scene"],"intervals":[1,5,10,15,30,60],"brightness":"0–100% slider; startup60%","power":["Automatic schedule","Always on","Screen off"]]
             if let d=try? JSONSerialization.data(withJSONObject:tree,options:.prettyPrinted){print(String(data:d,encoding:.utf8)!)}
             NSApp.terminate(nil);return
         }
@@ -382,7 +382,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
 }
 @main struct HelperMain {
     static func main(){
-        if CommandLine.arguments.contains("--version"){print("XIAO Display Helper 2.1.3");return}
+        if CommandLine.arguments.contains("--version"){print("XIAO Display Helper 2.1.4");return}
         let app=NSApplication.shared
         let delegate=AppDelegate();app.delegate=delegate;withExtendedLifetime(delegate){app.run()}
     }

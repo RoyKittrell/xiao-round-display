@@ -42,8 +42,8 @@ def configuration():
 def build():
  staged=Path(tempfile.mkdtemp(prefix='xiao-helper-build-',dir='/tmp'))/(NAME+'.app');contents=staged/'Contents';macos=contents/'MacOS';macos.mkdir(parents=True,exist_ok=True)
  info={'CFBundleName':NAME,'CFBundleDisplayName':NAME,'CFBundleIdentifier':LABEL,
-       'CFBundleExecutable':NAME,'CFBundlePackageType':'APPL','CFBundleVersion':'9',
-       'CFBundleShortVersionString':'2.1.3','LSUIElement':True,
+       'CFBundleExecutable':NAME,'CFBundlePackageType':'APPL','CFBundleVersion':'10',
+       'CFBundleShortVersionString':'2.1.4','LSUIElement':True,
        'XIAOPythonPath':str(Path(sys.executable).absolute()),
        'NSLocalNetworkUsageDescription':'Reads your Bambu Printer printer status to show print progress on your XIAO display.',
        'NSHumanReadableCopyright':"XIAO Display — USB display updater"}

@@ -2,7 +2,7 @@ import Foundation
 
 struct Preferences: Codable {
     var schemaVersion=1, revision:UInt32=1, enabledMask=511
-    var carousel=true, intervalSeconds=900, dayBrightness=0, nightBrightness=0
+    var carousel=true, intervalSeconds=900, dayBrightness=60, nightBrightness=60
     var appearance=0, power=0, selectedScene = -1
     var selectionToken:UInt32=0, brightnessToken:UInt32=0
 }

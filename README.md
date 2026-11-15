@@ -87,13 +87,14 @@ commands. See [PRIVACY.md](docs/PRIVACY.md).
 
 - Double-tap the glass near 12 o'clock to advance through included scenes.
 - Tap the centre of a clock to change watch face; scene-specific taps reveal information.
-- Right-edge swipes adjust brightness. Firmware control requires the display's
-  KE backlight switch to connect D6; a bypassed pin cannot dim the physical backlight.
+- Right-edge swipes adjust brightness. **Turn KE switch2 ON** to connect D6 to
+  the backlight; with `ON KE` above `1 2`, slide2 upward. See the illustrated
+  [hardware brightness setup](docs/SETUP.md#2-enable-hardware-brightness-control-ke-switch-2).
 - The carousel is configurable from the menu. Selecting no scenes pauses it on
   the current scene. Manual scene selection remains available.
 - Night palette: 17:00–07:30; USB screen sleep: 01:00–07:00, in configured civil time.
   A clock advances to the next watch face at half past the hour while visible.
-- Startup brightness is **0%**. Set a level explicitly after connection.
+- Startup brightness is **60%**, after the first frame is ready.
   Old saved brightness is never replayed automatically on boot/reconnect.
 
 UTC is the neutral time default. A single local configuration command can write

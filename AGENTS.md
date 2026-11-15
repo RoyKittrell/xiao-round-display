@@ -15,7 +15,8 @@ Preserve all scenes/assets when a menu preference changes. Maintain native-menu
 caching and the persistent checklist; avoid rebuilding menus or doing network
 work on the UI thread. One Python worker owns USB. New integrations use the
 allowlisted source registry and bounded CRC packets. Do not issue printer-control
-commands from the status monitor. Startup brightness remains0%.
+commands from the status monitor. Startup brightness is60%, with first-frame
+blanking; preserve true0% and screen-off support, and do not replay cached levels.
 
 Use tools/check.py for offline checks, then compile the intended MCU target and
 stage the native app where relevant. Never silently test by querying someone's

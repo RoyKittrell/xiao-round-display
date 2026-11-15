@@ -54,7 +54,7 @@ void reset(uint32_t seconds=0){
 }
 void power(bool present){usbPower.observe(true,present,nowMs);}
 int main(){
- assert(DisplayLighting().dayBrightness==0&&DisplayLighting().nightBrightness==0);
+ assert(DisplayLighting().dayBrightness==60&&DisplayLighting().nightBrightness==60);
  assert(!scheduledDisplayOff(3599,true)&&scheduledDisplayOff(3600,true));
  assert(scheduledDisplayOff(7*3600-1,true)&&!scheduledDisplayOff(7*3600,true));
  for(uint32_t t=0;t<7*86400;t++){
@@ -133,11 +133,15 @@ int main(){
  reset(12*3600);selectScene(8);serviceDisplaySchedule();assert(life.running());
  clockSeconds=3600;power(true);serviceDisplaySchedule();assert(displaySleeping&&!life.running());
  clockSeconds=25200;power(true);serviceDisplaySchedule();assert(!displaySleeping&&life.running()&&mode==8);
- // Actual menu-control handler: cached brightness never brightens a boot.
+ // Startup paint guard: profile defaults60%, but no light before the first frame.
+ reset(12*3600);lighting=DisplayLighting();scheduledWakeRepaint=true;serviceLighting();assert(hardwarePWM==0);
+ scheduledWakeRepaint=false;for(int i=0;i<120;i++){nowMs+=10;serviceLighting();}
+ assert(hardwarePWM==Backlight::duty((60*Backlight::Maximum+50)/100));
+ // Actual menu-control handler: cached levels never replace the60% boot default.
  reset(12*3600);lighting=DisplayLighting();sceneControl.setSession(123);serviceLighting();
  SceneControl::Settings setting;setting.revision=1;setting.day=80;setting.night=25;
- applyMenuControl(setting);assert(lighting.dayBrightness==0&&lighting.nightBrightness==0&&hardwarePWM==0);
- setting.revision=2;setting.brightness=true;setting.targetBoot=999;applyMenuControl(setting);assert(lighting.dayBrightness==0);
+ applyMenuControl(setting);assert(lighting.dayBrightness==60&&lighting.nightBrightness==60&&hardwarePWM==Backlight::duty((60*Backlight::Maximum+50)/100));
+ setting.revision=2;setting.brightness=true;setting.targetBoot=999;applyMenuControl(setting);assert(lighting.dayBrightness==60);
  setting.revision=3;setting.targetBoot=123;setting.day=10;setting.night=2;applyMenuControl(setting);assert(lighting.dayBrightness==10&&lighting.nightBrightness==2);
  nowMs+=100;auto before=sceneRotation.remaining(nowMs);
  setting.revision=4;setting.day=12;applyMenuControl(setting);assert(sceneRotation.remaining(nowMs)==before); // Dimming does not restart carousel.
@@ -158,7 +162,7 @@ int main(){
  setting.revision=2;setting.mask=(1u<<7)|(1u<<8);setting.seconds=60;applyMenuControl(setting);
  serviceDisplaySchedule();assert(mode==4);nowMs+=59999;serviceDisplaySchedule();assert(mode==4);
  nowMs++;serviceDisplaySchedule();assert(mode==9);nowMs+=60000;serviceDisplaySchedule();assert(mode==10);
- puts("PASS actual menu handler: zero-brightness boot/replay, explicit boot-bound brightness, filtered carousel, hold, manual selection, idempotence and LCD off/on.");
+ puts("PASS actual menu handler: 60% boot/cached-profile isolation, explicit boot-bound brightness, filtered carousel, hold, manual selection, idempotence and LCD off/on.");
  puts("PASS 15-minute scene dwell, all-nine wrap, manual reset, sleep/calibration inhibition, no catch-up, RTC independence and millis rollover.");
  puts("PASS actual display sleep/wake/lighting functions, USB-only boundaries, VBUS outages/hotplug, half-past rotation/wrap and recovery isolation.");
 }

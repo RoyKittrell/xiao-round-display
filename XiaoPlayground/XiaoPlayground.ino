@@ -43,7 +43,7 @@ TouchContact touchContact;
 TouchCoordinates touchCoordinates;
 TouchCalibration touchCalibration;
 DisplayBusHealth displayBus;
-const char* firmwareTag="public-template-r24";
+const char* firmwareTag="public-template-r25";
 volatile bool touchReportPending=true;
 void touchReportReady(){touchReportPending=true;}
 bool traceTouch=false;
@@ -710,6 +710,8 @@ void setup(){
  clockSeconds=clockEpoch(buildClock);clockTickMs=millis();clockReady=true;
  clockPollMs=millis()-1000;serviceClock();printClock();
  serviceUsbPower(true);displaySleeping=sceneControl.displayOff(clockSeconds,usbPower.connected(millis()));
+ // Keep the panel dark until its first complete frame is ready.
+ scheduledWakeRepaint=!displaySleeping;
  pinMode(PIN_D6,OUTPUT);analogWriteResolution(12);analogWriteFrequency(2000);serviceLighting();lcd.begin(16000000);lcd.setRotation(0);
  if(displaySleeping){lcd.sendCommand(GC9A01A_DISPOFF);lcd.sendCommand(GC9A01A_SLPIN);}
  if(!cv.getBuffer()||!previous.getBuffer()||!moonImage.getBuffer()||!sunImage.getBuffer()||!textMask.getBuffer()){Serial.println("ERROR framebuffer allocation");while(1)delay(1000);}

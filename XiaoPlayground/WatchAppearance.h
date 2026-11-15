@@ -14,7 +14,7 @@ class DisplayLighting {
  public:
  AppearanceOverride overrideMode=AppearanceOverride::Automatic;
  WatchAppearance appearance=WatchAppearance::Light;
- uint8_t dayBrightness=0,nightBrightness=0;
+ uint8_t dayBrightness=60,nightBrightness=60;
  bool update(uint32_t localSeconds){
   auto next=overrideMode==AppearanceOverride::Automatic?scheduledAppearance(localSeconds):
    overrideMode==AppearanceOverride::Dark?WatchAppearance::Dark:WatchAppearance::Light;

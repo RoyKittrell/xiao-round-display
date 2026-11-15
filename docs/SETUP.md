@@ -22,7 +22,31 @@ Newer packages have changed board naming. Do not silently replace the FQBN or
 upgrade the core while assuming that pins, timers and upload targets remain identical.
 Check the installed board definitions and the chip before selecting an alias.
 
-## 2. Configure civil time and optional observer
+## 2. Enable hardware brightness control: KE switch 2
+
+Before closing the display's case:
+
+1. Unplug USB and disconnect any main rechargeable battery.
+2. Find the tiny two-position **KE** switch between the microSD slot and the
+   XIAO sockets. It is separate from the large display power switch.
+3. Move **switch 2 toward ON**. With `ON KE` above the sliders and `1 2` below
+   them, move slider **2 upward**. This connects D6 to the backlight driver.
+4. Switch1 is optional: it enables battery-voltage sensing and is not required
+   for brightness. Leave the large power switch ON for normal use.
+5. Reconnect USB and test the menu brightness slider before replacing the case.
+
+[Seeed's close-up](https://files.seeedstudio.com/wiki/round_display_for_xiao/90.jpg)
+and [switch schematic](https://files.seeedstudio.com/wiki/round_display_for_xiao/91.png)
+show the location and D6/backlight connection. A successful software percentage
+or PWM acknowledgement does not prove the backlight is connected when KE2 is OFF.
+
+Startup brightness is **60%** in both day/night profiles. The backlight stays
+dark through initialization and fades up after the first frame. Existing manual
+brightness choices and explicitly selected profiles can override the level;
+cached host settings are not automatically replayed after restart/reconnection.
+Scheduled screen-off and the menu's Screen Off option still blank the backlight.
+
+## 3. Configure civil time and optional observer
 
 Defaults are UTC, no observer and no branding. For another fixed offset, provide
 your own numbers through the local setup tool. Both coordinates are optional;
@@ -40,7 +64,7 @@ restart the helper after changing helper settings. Keep their fixed offsets
 matched. DST changes need another explicit update. Location and branding are
 optional; do not commit the local header if it identifies the owner.
 
-## 3. Compile and flash
+## 4. Compile and flash
 
 The required graphics libraries are included in `libraries/`, including the
 project's GC9A01A driver modifications. Retain their notices when distributing.
@@ -73,7 +97,7 @@ only provisional. Configure USB and start the helper to synchronize real time;
 accurate astronomy depends on that clock. An optional CR927 preserves RTC time
 while main power is absent.
 
-## 4. Build the menu app
+## 5. Build the menu app
 
 Install Xcode Command Line Tools (`xcode-select --install`) and Python 3.10 or
 newer. Use a persistent virtual environment; the installed app records that
@@ -107,7 +131,7 @@ or deletion by its owner. The installer manages one menu helper per Mac.
 Manual backend test instances can use separate data directories and serial
 devices; do not run two workers against one USB port.
 
-## 5. Connect optional sources
+## 6. Connect optional sources
 
 ### Codex
 
@@ -137,7 +161,7 @@ Enable `sun` to download NASA He II 304 Å imagery and NOAA observations. These
 requests are public and do not need user credentials. Missing/stale fields are
 shown as unavailable/old. No captured readings are included in this repository.
 
-## 6. Offline checks
+## 7. Offline checks
 
 Install development dependencies, then run:
 
