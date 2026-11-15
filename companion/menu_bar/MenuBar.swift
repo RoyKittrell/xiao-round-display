@@ -92,6 +92,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     let stateQueue=DispatchQueue(label:"org.xiaodisplay.menu-state",qos:.utility)
     var stateReadPending=false,menuIsOpen=false,lastMenuSignature="",profileMenuGeneration=0
     var sourceEntries:[String:NSMenuItem]=[:]
+    var menuActivity:NSObjectProtocol?
     var connected:Bool {
         let timestamp=health["updated_at"] as? Double ?? 0
         return (health["usb_connected"] as? Bool ?? false) && Date().timeIntervalSince1970-timestamp<20
@@ -133,7 +134,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     func startWorker(){
         let python=Bundle.main.object(forInfoDictionaryKey:"XIAOPythonPath") as? String ?? ""
         let script=Bundle.main.resourceURL!.appendingPathComponent("companion/display_bridge.py")
-        let process=Process();process.executableURL=URL(fileURLWithPath:python);process.arguments=["-B","-u",script.path]
+        let process=Process();process.qualityOfService = .utility;process.executableURL=URL(fileURLWithPath:python);process.arguments=["-B","-u",script.path]
         var env=ProcessInfo.processInfo.environment;env["XIAO_DISPLAY_DATA_DIR"]=dataRoot.path;env["PYTHONDONTWRITEBYTECODE"]="1";env["XIAO_MENU_OWNER_PID"]=String(getpid());process.environment=env
         process.currentDirectoryURL=dataRoot;process.standardOutput=FileHandle.standardOutput;process.standardError=FileHandle.standardError
         process.terminationHandler={[weak self] _ in DispatchQueue.main.async{if self?.quitting==false{NSApp.terminate(nil)}}}
@@ -153,7 +154,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
         if getpgid(pid)==pid && pid != getpgrp(){kill(-pid,number)}else{kill(pid,number)}
     }
     func shutdown(unload:Bool){
-        if quitting{return};quitting=true;timer?.invalidate();signalWorker(SIGTERM)
+        if quitting{return};quitting=true;endMenuActivity();timer?.invalidate();signalWorker(SIGTERM)
         let worker=child
         DispatchQueue.global().async{[weak self] in
             let deadline=Date().addingTimeInterval(2)
@@ -200,7 +201,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
                 if self.prefs.revision==revisionWhenRequested,let saved=saved{self.prefs=saved}
                 self.device=deviceState;self.health=workerState
                 self.carouselChecklist?.update(mask:self.prefs.enabledMask);self.updateTip()
-                if self.menuIsOpen{self.updateBrightnessFeedback();self.refreshSourceItems()}
+                // Keep navigation stable: source-age labels are snapshots on opening.
+                if self.menuIsOpen{self.updateBrightnessFeedback()}
                 self.prepareMenuIfNeeded()
             }
         }
@@ -226,9 +228,22 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
          device["error"] as? String ?? "",String(profileMenuGeneration)].joined(separator:"|")
     }
     func prepareMenuIfNeeded(){if !menuIsOpen && menuSignature != lastMenuSignature{rebuild()}}
-    func menuWillOpen(_ menu:NSMenu){menuIsOpen=true;updateBrightnessFeedback();refreshSourceItems()}
+    func menuWillOpen(_ menu:NSMenu){
+        guard menu === self.menu else{return}
+        menuIsOpen=true
+        if menuActivity==nil {
+            // Menu-bar apps have no ordinary foreground window. Keep this
+            // user interaction awake without preventing the Mac from sleeping.
+            menuActivity=ProcessInfo.processInfo.beginActivity(options:.userInitiatedAllowingIdleSystemSleep,reason:"Using display controls")
+        }
+        updateBrightnessFeedback();refreshSourceItems()
+    }
+    func endMenuActivity(){
+        if let activity=menuActivity{ProcessInfo.processInfo.endActivity(activity);menuActivity=nil}
+    }
     func menuDidClose(_ menu:NSMenu){
-        menuIsOpen=false
+        guard menu === self.menu else{return}
+        menuIsOpen=false;endMenuActivity()
         DispatchQueue.main.async{[weak self] in self?.prepareMenuIfNeeded()}
     }
     @discardableResult func add(_ title:String,to target:NSMenu?=nil,action:Selector?=nil,tag:Int=0,checked:Bool=false,enabled:Bool=true)->NSMenuItem{
@@ -377,12 +392,12 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply {
         if quitting{return .terminateNow};shutdown(unload:false);return .terminateCancel
     }
-    func applicationWillTerminate(_ notification:Notification){quitting=true;timer?.invalidate();signalWorker(SIGTERM)}
+    func applicationWillTerminate(_ notification:Notification){quitting=true;endMenuActivity();timer?.invalidate();signalWorker(SIGTERM)}
 
 }
 @main struct HelperMain {
     static func main(){
-        if CommandLine.arguments.contains("--version"){print("XIAO Display Helper 2.1.4");return}
+        if CommandLine.arguments.contains("--version"){print("XIAO Display Helper 2.1.5");return}
         let app=NSApplication.shared
         let delegate=AppDelegate();app.delegate=delegate;withExtendedLifetime(delegate){app.run()}
     }

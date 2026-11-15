@@ -32,18 +32,20 @@ EXECUTABLE=APP/'Contents/MacOS'/NAME
 LSREGISTER='/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
 
 def configuration():
+ # This launches the native menu UI, not just its data worker. Background
+ # classification caps UI scheduling even when the user opens the menu.
  return {'Label':LABEL,'ProgramArguments':[str(EXECUTABLE)],
          'AssociatedBundleIdentifiers':[LABEL],'Comment':NAME,
          'WorkingDirectory':str(DATA),'RunAtLoad':True,'KeepAlive':True,'ThrottleInterval':30,
-         'ProcessType':'Background','Umask':0o077,
+         'ProcessType':'Interactive','Umask':0o077,
          'EnvironmentVariables':{'PATH':'/usr/bin:/bin:/usr/sbin:/sbin','PYTHONUNBUFFERED':'1','PYTHONDONTWRITEBYTECODE':'1','XIAO_DISPLAY_DATA_DIR':str(DATA)},
          'StandardOutPath':str(LOGS/'updater.log'),'StandardErrorPath':str(LOGS/'updater-error.log')}
 
 def build():
  staged=Path(tempfile.mkdtemp(prefix='xiao-helper-build-',dir='/tmp'))/(NAME+'.app');contents=staged/'Contents';macos=contents/'MacOS';macos.mkdir(parents=True,exist_ok=True)
  info={'CFBundleName':NAME,'CFBundleDisplayName':NAME,'CFBundleIdentifier':LABEL,
-       'CFBundleExecutable':NAME,'CFBundlePackageType':'APPL','CFBundleVersion':'10',
-       'CFBundleShortVersionString':'2.1.4','LSUIElement':True,
+       'CFBundleExecutable':NAME,'CFBundlePackageType':'APPL','CFBundleVersion':'11',
+       'CFBundleShortVersionString':'2.1.5','LSUIElement':True,
        'XIAOPythonPath':str(Path(sys.executable).absolute()),
        'NSLocalNetworkUsageDescription':'Reads your Bambu Printer printer status to show print progress on your XIAO display.',
        'NSHumanReadableCopyright':"XIAO Display — USB display updater"}

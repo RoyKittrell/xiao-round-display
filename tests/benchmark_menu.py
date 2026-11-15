@@ -29,6 +29,15 @@ harness=r'''
    samples.append((CFAbsoluteTimeGetCurrent()-t)*1000)
    assert(delegate.carouselChecklist === view)
   }
+  assert(delegate.menuActivity != nil)
+  let activity=delegate.menuActivity!
+  delegate.menuWillOpen(delegate.menu)
+  assert(delegate.menuActivity === activity)
+  let other=NSMenu();delegate.menuDidClose(other)
+  assert(delegate.menuIsOpen && delegate.menuActivity != nil)
+  delegate.menuDidClose(delegate.menu)
+  assert(!delegate.menuIsOpen && delegate.menuActivity == nil)
+  delegate.menuDidClose(delegate.menu) // Idempotent activity cleanup.
   view.update(mask:384);t=CFAbsoluteTimeGetCurrent()
   for _ in 0..<10000{view.update(mask:384)}
   let unchangedMS=(CFAbsoluteTimeGetCurrent()-t)*1000/10000
@@ -40,7 +49,7 @@ harness=r'''
   samples.sort()
   let output:[String:Any]=["initial_build_ms":buildMS,"cached_open_median_ms":samples[samples.count/2],
    "cached_open_max_ms":samples.last!,"unchanged_checklist_update_ms":unchangedMS,
-   "menu_opens_measured":samples.count,"view_reused":true,"all_none_mixed_states":true]
+   "menu_opens_measured":samples.count,"view_reused":true,"all_none_mixed_states":true,"menu_activity_balanced":true]
   print(String(data:try JSONSerialization.data(withJSONObject:output,options:[.prettyPrinted,.sortedKeys]),encoding:.utf8)!)
  }
 }

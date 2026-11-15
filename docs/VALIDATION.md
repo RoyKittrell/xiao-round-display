@@ -32,3 +32,11 @@ until the first complete frame, and preserves Screen Off/scheduled-sleep0%.
 Tests verify that cached0%/100% requests cannot replace the boot level without
 a fresh explicit action. The setup guide identifies KE switch2 and its ON
 direction; switch1 is optional battery sensing.
+
+Helper2.1.5 launches the native menu as an Interactive app, with its data
+subprocess at utility QoS. A menu-scoped activity prevents App Nap only while
+controls are open and allows idle system sleep. The native callback harness
+checks activity reuse/cleanup, view reuse and All/None/mixed checklist states.
+Source-age labels refresh on opening rather than changing during navigation.
+The offline suite and signed app staging passed; the originating installation
+also confirmed that opening and moving through menus became responsive.
