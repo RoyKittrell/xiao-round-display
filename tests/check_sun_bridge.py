@@ -32,3 +32,13 @@ bridge.send(pixels,meta,'fake',on_progress=progress)
 assert interleaved==list(range(16,1921,16))
 print('120 auxiliary status/control opportunities verified between solar rows, including before final commit')
 print('57,600 RGB565 pixels, complete coverage, CRCs, metadata and bounded packet size verified')
+
+# Wireless image transfer must yield after every acknowledged pixel packet,
+# so scene/brightness controls and connection health are not starved.
+from unittest.mock import patch
+import display_transport
+wireless=[]
+with patch.object(display_transport,'open_port',Board):
+ bridge.send(pixels,meta,'ble://12345678-1234-1234-1234-123456789abc',on_progress=lambda port:wireless.append(port.packet_count))
+assert wireless==list(range(1,1921))
+print('1920 wireless control/health opportunities verified, one per image packet')

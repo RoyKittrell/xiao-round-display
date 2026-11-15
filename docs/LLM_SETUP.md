@@ -1,7 +1,7 @@
 # Setup handoff for an LLM
 
 The repository is a template, not a backup of a configured installation. Read
-README.md, SETUP.md, PRIVACY.md and AGENTS.md before making changes.
+README.md, docs/SETUP.md, docs/PRIVACY.md and AGENTS.md before making changes.
 
 ## Ask the owner only for missing non-secret choices
 
@@ -33,6 +33,19 @@ README.md, SETUP.md, PRIVACY.md and AGENTS.md before making changes.
   disable TLS verification in the authenticated monitor.
 - Enable Sun if desired; it uses public endpoints and needs no credentials.
 - Build locally with manage.py stage before an owner-requested installation.
+- Bluetooth is optional and experimental. Start with USB; after firmware is
+  loaded, use the menu to discover and explicitly choose the owner's display.
+  Never copy a pairing UUID or bond from another installation. Pairing uses the
+  code shown on the display and macOS's own prompt; do not request it in chat.
+- The installed helper copies its project environment into Application Support;
+  retain the underlying Python installation. Local ad-hoc signing can cause
+  macOS to ask for Bluetooth access again after rebuilding. Check the named
+  helper in Privacy & Security → Bluetooth and retry discovery; keep USB usable.
+- Scene selection, inclusion and data updates can use Bluetooth. Creating a
+  renderer/animation or adding compiled assets still requires USB firmware upload.
+- Distinguish offline coverage, originating-hardware observations and a new
+  owner's actual checks. Final-package Bluetooth reconnect/permission testing
+  and complete wireless Sun-image delivery are not yet verified.
 
 ## Keep the working shell honest
 
@@ -42,7 +55,7 @@ from a real installation. The Sun placeholder also contains no captured data.
 Synthetic fixtures belong in tests and must be labelled as such.
 
 Keep renderers separate from fetch adapters. New sources use the allowlisted
-factory registry, bounded packet parsers and the single USB dispatcher; no UI
+factory registry, bounded packet parsers and the single display dispatcher; no UI
 opens a competing serial connection. Preserve CRC checking, stale timestamps,
 unknown-value indicators, startup60% brightness after first-frame blanking and
 idempotent controls. Enable KE switch2 physically for D6/backlight control; a

@@ -85,8 +85,8 @@ def wait_for(port,prefix,timeout=5):
  raise TimeoutError('No device acknowledgement: '+prefix)
 
 def send(pixels,meta,device,on_progress=None):
- import serial
- with serial.Serial(device,115200,timeout=.25,write_timeout=5) as port:
+ from display_transport import open_port
+ with open_port(device,115200,timeout=.25,write_timeout=5) as port:
   port.reset_input_buffer()
   now=datetime.now(civil_zone(ROOT))
   port.write(('T'+now.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]+'\n').encode());port.flush()
@@ -102,7 +102,8 @@ def send(pixels,meta,device,on_progress=None):
      try:wait_for(port,f'ACK P {row} {col}',3);break
      except TimeoutError:
       if attempt==2:raise
-   if on_progress and row%2==1:on_progress(port)
+    if on_progress and str(device).startswith('ble://'):on_progress(port)
+   if on_progress and not str(device).startswith('ble://') and row%2==1:on_progress(port)
    if row%60==59:print(f'Sun transfer {row+1}/240 rows',flush=True)
   port.write(b'@E\n');port.flush();wait_for(port,'ACK E')
   print('Updated XIAO: dated Sun image, NOAA observations, and RTC',flush=True)

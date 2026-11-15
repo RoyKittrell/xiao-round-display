@@ -32,3 +32,12 @@ dist/
 XiaoPlayground/UserSettings.local.h
 companion/service/*.plist
 companion/service/launcher_paths.h
+
+# Local Bluetooth pairing and diagnostic state
+display-connection.json
+bluetooth-status.json
+
+# Installed dependency environments when a custom data root is inside a checkout
+python-runtime/
+python-runtime.installing/
+python-runtime.previous/

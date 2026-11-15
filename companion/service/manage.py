@@ -2,7 +2,7 @@
 """Install/manage XIAO Display Helper as a named per-user macOS app.
 
 No privileged daemon, firmware changes or credential copying. Run with the
-project's bundled Python, which has Pillow for the existing Sun updater.
+project's virtual environment after installing requirements.txt.
 """
 import argparse
 import json
@@ -41,20 +41,44 @@ def configuration():
          'EnvironmentVariables':{'PATH':'/usr/bin:/bin:/usr/sbin:/sbin','PYTHONUNBUFFERED':'1','PYTHONDONTWRITEBYTECODE':'1','XIAO_DISPLAY_DATA_DIR':str(DATA)},
          'StandardOutPath':str(LOGS/'updater.log'),'StandardErrorPath':str(LOGS/'updater-error.log')}
 
-def build():
+def prepare_runtime():
+ # Login services must not depend on a virtualenv inside protected Documents.
+ # Install the chosen environment beside local application state instead.
+ source=Path(sys.prefix);target=DATA/'python-runtime'
+ if source==Path(sys.base_prefix):raise RuntimeError('Install using the project virtual environment; see Bluetooth setup')
+ if source.resolve()==target.resolve():return target/'bin/python'
+ if target.resolve().is_relative_to(source.resolve()):raise RuntimeError('Application data must be outside the source virtual environment')
+ DATA.mkdir(mode=0o700,parents=True,exist_ok=True)
+ pending=DATA/'python-runtime.installing';previous=DATA/'python-runtime.previous'
+ if pending.exists():shutil.rmtree(pending)
+ shutil.copytree(source,pending,symlinks=True,ignore=shutil.ignore_patterns('__pycache__','*.pyc'))
+ if previous.exists():shutil.rmtree(previous)
+ if target.exists():target.rename(previous)
+ pending.rename(target)
+ executable=target/'bin/python'
+ try:subprocess.run([str(executable),'-B','-c','import PIL,bleak'],check=True,timeout=30)
+ except Exception:
+  shutil.rmtree(target)
+  if previous.exists():previous.rename(target)
+  raise
+ if previous.exists():shutil.rmtree(previous)
+ return executable
+
+def build(python_path=None):
  staged=Path(tempfile.mkdtemp(prefix='xiao-helper-build-',dir='/tmp'))/(NAME+'.app');contents=staged/'Contents';macos=contents/'MacOS';macos.mkdir(parents=True,exist_ok=True)
  info={'CFBundleName':NAME,'CFBundleDisplayName':NAME,'CFBundleIdentifier':LABEL,
-       'CFBundleExecutable':NAME,'CFBundlePackageType':'APPL','CFBundleVersion':'11',
-       'CFBundleShortVersionString':'2.1.5','LSUIElement':True,
-       'XIAOPythonPath':str(Path(sys.executable).absolute()),
-       'NSLocalNetworkUsageDescription':'Reads your Bambu Printer printer status to show print progress on your XIAO display.',
+       'CFBundleExecutable':NAME,'CFBundlePackageType':'APPL','CFBundleVersion':'14',
+       'CFBundleShortVersionString':'2.2.2','LSUIElement':True,
+       'XIAOPythonPath':str(python_path or Path(sys.executable).absolute()),
+       'NSBluetoothAlwaysUsageDescription':'Connects to your XIAO Round Display to send scene controls and live information without USB.',
+       'NSLocalNetworkUsageDescription':'Reads your printer status to show print progress on your XIAO display.',
        'NSHumanReadableCopyright':"XIAO Display — USB display updater"}
  (contents/'Info.plist').write_bytes(plistlib.dumps(info))
  runtime=contents/'Resources/companion';runtime.mkdir(parents=True,exist_ok=True)
- for filename in ('display_bridge.py','codex_usage.py','sun_bridge.py','bambu_status.py','helper_runtime.py','display_control.py','scenes.json','process_owner.py','runtime_config.py'):
+ for filename in ('display_bridge.py','codex_usage.py','sun_bridge.py','bambu_status.py','helper_runtime.py','display_control.py','scenes.json','process_owner.py','runtime_config.py','display_transport.py'):
   shutil.copyfile(ROOT/'companion'/filename,runtime/filename)
  shutil.copytree(ROOT/'companion/sources',runtime/'sources',ignore=shutil.ignore_patterns('__pycache__','*.pyc'),copy_function=shutil.copyfile)
- subprocess.run(['/usr/bin/swiftc','-swift-version','5','-module-cache-path','/tmp/xiao-swift-cache','-O',str(ROOT/'companion/menu_bar/MenuBar.swift'),str(ROOT/'companion/menu_bar/Profiles.swift'),'-o',str(macos/NAME),'-framework','AppKit'],check=True)
+ subprocess.run(['/usr/bin/swiftc','-swift-version','5','-module-cache-path','/tmp/xiao-swift-cache','-O',str(ROOT/'companion/menu_bar/MenuBar.swift'),str(ROOT/'companion/menu_bar/Profiles.swift'),str(ROOT/'companion/menu_bar/BluetoothSearch.swift'),'-o',str(macos/NAME),'-framework','AppKit'],check=True)
  subprocess.run(['/usr/bin/codesign','--force','--sign','-','--identifier',LABEL,str(staged)],check=True)
  subprocess.run([str(macos/NAME),'--version'],check=True)
  with zipfile.ZipFile(SERVICE/(NAME+'.app.zip'),'w',zipfile.ZIP_DEFLATED) as archive:
@@ -81,7 +105,9 @@ def main():
  if args.action=='stage':
   build();staged=SERVICE/f'{LABEL}.plist';staged.write_bytes(plistlib.dumps(configuration()));print(staged);return
  if args.action=='install':
-  staged=build() # Finish and validate the replacement before stopping old job.
+  runtime_python=DATA/'python-runtime/bin/python'
+  staged=build(runtime_python) # Finish and validate the replacement before stopping old job.
+  prepare_runtime()
   LOGS.mkdir(mode=0o700,parents=True,exist_ok=True);TARGET.parent.mkdir(parents=True,exist_ok=True)
   for folder in ('companion','assets/codex_usage','assets/sun','assets/bambu'):(DATA/folder).mkdir(parents=True,exist_ok=True)
   for label in (OLD_LABEL,LABEL):
@@ -111,8 +137,20 @@ def main():
   if status.returncode:
    if not TARGET.exists():raise SystemExit('Helper is not installed; run manage.py install first')
    run('enable',f'{DOMAIN}/{LABEL}');bootstrap()
-  else:run('kickstart',f'{DOMAIN}/{LABEL}')
- elif args.action=='stop':run('bootout',f'{DOMAIN}/{LABEL}')
+  else:
+   result=subprocess.run(['launchctl','kickstart',f'{DOMAIN}/{LABEL}'],capture_output=True,text=True)
+   if result.returncode==113:
+    # A just-booted-out job can remain visible to print briefly, then vanish.
+    run('enable',f'{DOMAIN}/{LABEL}');bootstrap()
+   elif result.returncode:raise RuntimeError('Could not start '+NAME+': '+result.stderr.strip())
+ elif args.action=='stop':
+  run('bootout',f'{DOMAIN}/{LABEL}')
+  # bootout is asynchronous; a subsequent start must not kick the dying job.
+  for attempt in range(25):
+   status=subprocess.run(['launchctl','print',f'{DOMAIN}/{LABEL}'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+   if status.returncode:break
+   if attempt==24:raise RuntimeError('Helper is still stopping; try start again in a moment')
+   time.sleep(.2)
  elif args.action=='uninstall':
   run('bootout',f'{DOMAIN}/{LABEL}',check=False)
   if TARGET.exists():TARGET.unlink()

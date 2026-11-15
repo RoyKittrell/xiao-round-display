@@ -93,9 +93,11 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     var stateReadPending=false,menuIsOpen=false,lastMenuSignature="",profileMenuGeneration=0
     var sourceEntries:[String:NSMenuItem]=[:]
     var menuActivity:NSObjectProtocol?
+    var connectionSettings:[String:String]=[:],bluetoothScanRunning=false
+    let connectionURL=dataRoot.appendingPathComponent("display-connection.json")
     var connected:Bool {
         let timestamp=health["updated_at"] as? Double ?? 0
-        return (health["usb_connected"] as? Bool ?? false) && Date().timeIntervalSince1970-timestamp<20
+        return (health["display_connected"] as? Bool ?? health["usb_connected"] as? Bool ?? false) && Date().timeIntervalSince1970-timestamp<20
     }
     var currentScene:Int { device["scene"] as? Int ?? prefs.selectedScene }
     var actualNight:Bool {
@@ -120,6 +122,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
         NSApp.setActivationPolicy(.accessory)
         do{profileStore=try ProfileStore(url:dataRoot.appendingPathComponent("display-profiles.json"))}
         catch{showError("Could not load profiles. Your saved file has been left untouched. \(error.localizedDescription)")}
+        connectionSettings=object(connectionURL) as? [String:String] ?? ["mode":"usb"]
         load();item=NSStatusBar.system.statusItem(withLength:NSStatusItem.squareLength)
         if let button=item.button {
             button.image=NSImage(systemSymbolName:"circle.dotted.circle",accessibilityDescription:"XIAO display controls")
@@ -171,7 +174,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     }
     func updateBrightnessFeedback(){
         guard let box=sliderBox else{return}
-        if !connected{box.feedback.show("USB not connected or configured");return}
+        if !connected{box.feedback.show("Display disconnected");return}
         if device["error"] != nil{box.feedback.show("Waiting for display confirmation");return}
         let off=(device["sleeping"] as? Int ?? 0)==1
         if let revision=pendingBrightnessRevision,let target=pendingBrightnessValue {
@@ -225,7 +228,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
         [String(prefs.revision),String(currentScene),String(connected),String(actualNight),
          String(device["sleeping"] as? Int ?? -1),String(device["revision"] as? UInt32 ?? 0),
          String(device["day_brightness"] as? Int ?? -1),String(device["night_brightness"] as? Int ?? -1),
-         device["error"] as? String ?? "",String(profileMenuGeneration)].joined(separator:"|")
+         device["error"] as? String ?? "",String(profileMenuGeneration),connectionSettings["mode"] ?? "usb",connectionSettings["bluetooth_id"] ?? "",String(bluetoothScanRunning)].joined(separator:"|")
     }
     func prepareMenuIfNeeded(){if !menuIsOpen && menuSignature != lastMenuSignature{rebuild()}}
     func menuWillOpen(_ menu:NSMenu){
@@ -253,7 +256,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     func rebuild(){
         menu.removeAllItems();add("XIAO Round Display",enabled:false)
         let current=scenes.first{$0.id==currentScene}?.name ?? "Ready"
-        add(connected ? "Connected · \(current)":"USB disconnected · changes will queue",enabled:false)
+        add(connected ? "Connected via \(health["transport"] as? String == "bluetooth" ? "Bluetooth":"USB") · \(current)":"Display disconnected · changes will queue",enabled:false)
         if connected,(device["revision"] as? UInt32 ?? 0) != prefs.revision{add("Applying settings…",enabled:false)}
         if device["error"] is String{add("Waiting for display controls",enabled:false)}
         menu.addItem(.separator())
@@ -292,6 +295,13 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
         add(off ? "Turn Screen On":"Turn Screen Off",action:#selector(toggleScreen(_:)))
         let power=submenu("Power")
         for (i,name) in ["Automatic · sleep 01:00–07:00","Always on","Screen off"].enumerated(){add(name,to:power,action:#selector(changePower(_:)),tag:i,checked:prefs.power==i)}
+        let connections=submenu("Connection")
+        let connectionMode=connectionSettings["mode"] ?? "usb",hasBluetooth=connectionSettings["bluetooth_id"] != nil
+        add("USB",to:connections,action:#selector(changeConnection(_:)),tag:0,checked:connectionMode=="usb")
+        add("Bluetooth",to:connections,action:#selector(changeConnection(_:)),tag:1,checked:connectionMode=="bluetooth",enabled:hasBluetooth)
+        add("Automatic · prefer USB",to:connections,action:#selector(changeConnection(_:)),tag:2,checked:connectionMode=="auto",enabled:hasBluetooth)
+        connections.addItem(.separator())
+        add(bluetoothScanRunning ? "Searching for display…":"Find Bluetooth Display…",to:connections,action:#selector(findBluetooth(_:)),enabled: !bluetoothScanRunning)
         let sources=submenu("Data Sources")
         sourceEntries.removeAll()
         for key in ["codex","bambu","sun"]{
@@ -310,6 +320,41 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     }
     func refreshSourceItems(){
         for (key,entry) in sourceEntries{if let title=sourceTitle(key),entry.title != title{entry.title=title}}
+    }
+    func saveConnection(){
+        do{
+            let data=try JSONSerialization.data(withJSONObject:connectionSettings,options:[.prettyPrinted,.sortedKeys])
+            try data.write(to:connectionURL,options:.atomic);prepareMenuIfNeeded()
+        }catch{showError("Could not save connection: \(error.localizedDescription)")}
+    }
+    @objc func changeConnection(_ sender:NSMenuItem){
+        connectionSettings["mode"]=["usb","bluetooth","auto"][sender.tag];saveConnection()
+    }
+    @objc func findBluetooth(_ sender:NSMenuItem){
+        guard !bluetoothScanRunning else{return};bluetoothScanRunning=true
+        let python=Bundle.main.object(forInfoDictionaryKey:"XIAOPythonPath") as? String ?? ""
+        let script=Bundle.main.resourceURL!.appendingPathComponent("companion/display_transport.py")
+        DispatchQueue.global(qos:.userInitiated).async{[weak self] in
+            let scanResult=BluetoothSearch.run(python:python,script:script)
+            DispatchQueue.main.async{
+                guard let self=self,!self.quitting else{return};self.bluetoothScanRunning=false
+                defer{self.prepareMenuIfNeeded()}
+                if let error=scanResult["error"] as? String{self.showError(error+". Check System Settings → Privacy & Security → Bluetooth.");return}
+                guard let devices=scanResult["devices"] as? [[String:String]],!devices.isEmpty else{
+                    self.showError("No display found. Keep it powered on nearby. Its firmware must include Bluetooth support.");return
+                }
+                let alert=NSAlert();alert.messageText="Connect to Bluetooth Display"
+                alert.informativeText="Choose your display. If macOS asks for a pairing code, enter the six digits shown on its screen."
+                alert.addButton(withTitle:"Connect");alert.addButton(withTitle:"Cancel")
+                let choices=NSPopUpButton(frame:NSRect(x:0,y:0,width:310,height:28))
+                for device in devices{choices.addItem(withTitle:(device["name"] ?? "Display")+" · "+String((device["id"] ?? "").suffix(6)))}
+                alert.accessoryView=choices;NSApp.activate(ignoringOtherApps:true)
+                if alert.runModal() == .alertFirstButtonReturn{
+                    self.connectionSettings=["mode":"bluetooth","bluetooth_id":devices[choices.indexOfSelectedItem]["id"] ?? ""]
+                    self.saveConnection()
+                }
+            }
+        }
     }
     @objc func selectScene(_ sender:NSMenuItem){load();prefs.selectedScene=sender.tag;prefs.selectionToken=prefs.selectionToken==UInt32.max ? 1:prefs.selectionToken+1;save()}
     func toggleCarouselScene(_ id:Int){
@@ -397,7 +442,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
 }
 @main struct HelperMain {
     static func main(){
-        if CommandLine.arguments.contains("--version"){print("XIAO Display Helper 2.1.5");return}
+        if CommandLine.arguments.contains("--version"){print("XIAO Display Helper 2.2.2");return}
         let app=NSApplication.shared
         let delegate=AppDelegate();app.delegate=delegate;withExtendedLifetime(delegate){app.run()}
     }

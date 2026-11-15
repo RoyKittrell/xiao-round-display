@@ -7,6 +7,12 @@ This is a blank, user-configurable template. It contains the working scene and
 control code, with **no configured device, accounts, printer, location, saved
 profiles, live readings or enabled network feeds**. Integrations are opt-in.
 
+The helper supports USB and experimental paired Bluetooth LE for scene selection, profiles,
+appearance, brightness and live data. See [Bluetooth setup](docs/BLUETOOTH.md).
+New rendering code still needs a USB firmware upload. Bluetooth permissions and
+reconnection on the final package, plus complete wireless Sun-image delivery,
+still need physical verification; use USB as the initial/recovery path.
+
 ## Scenes
 
 - Ten analogue clock faces, inspired by landmark clocks, with day/night palettes.
@@ -35,7 +41,7 @@ The XIAO's USB socket faces outward. The display connects through its XIAO
 sockets. This firmware uses the existing Seeed pinout: D1 LCD CS, D3 LCD DC,
 D8 clock, D10 MOSI, D4/D5 touch/RTC I²C, D7 touch interrupt and D6 backlight.
 The board is **not an ESP32 and has no Wi-Fi**. The Mac fetches live data over
-its network and sends display packets over USB.
+its network and sends display packets over USB or paired Bluetooth LE.
 
 ## Start here
 

@@ -6,7 +6,7 @@ EXCLUDED={'.git','.venv','__pycache__','build','dist'}
 
 def audit(paths):
     errors=[]
-    forbidden_names={'settings.json','display-profiles.json','display-preferences.json','control-status.json','helper-status.json'}
+    forbidden_names={'settings.json','display-profiles.json','display-preferences.json','control-status.json','helper-status.json','display-connection.json','bluetooth-status.json'}
     patterns=[r'/Users/[A-Za-z0-9_.-]+/',r'/home/[A-Za-z0-9_.-]+/',
               r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
               r'gh[pousr]_[A-Za-z0-9]{30,}',r'github_pat_[A-Za-z0-9_]{30,}',
@@ -16,7 +16,7 @@ def audit(paths):
     for path in paths:
         rel=path.relative_to(ROOT)
         if any(p in EXCLUDED for p in rel.parts):continue
-        if path.name in forbidden_names or 'private' in rel.parts or path.suffix.lower() in ('.pem','.key','.p12','.elf','.hex','.bin','.uf2','.pyc','.zip'):
+        if path.name in forbidden_names or 'private' in rel.parts or any(part.startswith('python-runtime') for part in rel.parts) or path.suffix.lower() in ('.pem','.key','.p12','.elf','.hex','.bin','.uf2','.pyc','.zip'):
             errors.append((str(rel),'local/generated/credential file'));continue
         try:text=path.read_text()
         except UnicodeDecodeError:errors.append((str(rel),'unreviewed binary'));continue

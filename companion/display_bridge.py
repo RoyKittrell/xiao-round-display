@@ -15,6 +15,7 @@ import codex_usage,bambu_status,sun_bridge
 from helper_runtime import Registry
 from display_control import Control
 from process_owner import check_owner,stop_orphan
+from display_transport import open_port,endpoint,is_connected,close_bluetooth
 from sources import build as build_sources
 from runtime_config import DATA_ROOT,load,civil_zone
 
@@ -34,7 +35,7 @@ def sync_clock(port):
 
 def send_usage(snapshot,device,select=False):
     """Compatibility utility; stop the login service before standalone diagnostics."""
-    with usb_lock(),serial.Serial(device,115200,timeout=.2,write_timeout=5) as port:
+    with usb_lock(),open_port(device,115200,timeout=.2,write_timeout=5) as port:
         port.reset_input_buffer();sync_clock(port)
         port.write(codex_usage.packet(snapshot));port.flush();sun_bridge.wait_for(port,'ACK U',8)
         if select:port.write(b'0');port.flush()
@@ -45,7 +46,7 @@ def send_printer(value,device=None,port=None):
     if port is not None:
         port.write(bambu_status.packet(value));port.flush();sun_bridge.wait_for(port,'ACK M',3)
     else:
-        with usb_lock(),serial.Serial(device,115200,timeout=.2,write_timeout=5) as opened:
+        with usb_lock(),open_port(device,115200,timeout=.2,write_timeout=5) as opened:
             opened.reset_input_buffer();sync_clock(opened);send_printer(value,port=opened)
 
 class Dispatcher:
@@ -58,7 +59,7 @@ class Dispatcher:
         control_due=self.control is not None and self.control.due(force)
         if not due and not control_due:return
         if port is None:
-            with usb_lock(),serial.Serial(self.device,115200,timeout=.2,write_timeout=5) as opened:
+            with usb_lock(),open_port(self.device,115200,timeout=.2,write_timeout=5) as opened:
                 opened.reset_input_buffer();sync_clock(opened)
                 if control_due:self.control.send(opened)
                 self._packets(opened,due)
@@ -94,7 +95,7 @@ class Dispatcher:
 
 def health(registry,device):
     path=ROOT/'helper-status.json';temporary=path.with_suffix('.tmp')
-    temporary.write_text(json.dumps({'updated_at':int(time.time()),'usb_connected':bool(device) and Path(device).exists(),'sources':registry.status()},indent=2)+'\n');temporary.replace(path)
+    temporary.write_text(json.dumps({'updated_at':int(time.time()),'usb_connected':bool(device) and not str(device).startswith('ble://') and Path(device).exists(),'display_connected':bool(device) and is_connected(device),'transport':'bluetooth' if str(device).startswith('ble://') else 'usb','sources':registry.status()},indent=2)+'\n');temporary.replace(path)
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -123,18 +124,21 @@ def main():
         try:
             while True:
                 check_owner()
-                present=bool(args.device) and Path(args.device).exists()
+                selected=endpoint(ROOT,args.device)
+                if dispatcher.device!=selected:
+                    close_bluetooth();dispatcher.device=selected;connected=False;control.boot_id=0
+                present=str(selected).startswith('ble://') or bool(selected) and Path(selected).exists()
                 if not present:
-                    registry.connected.clear();connected=False;health(registry,args.device);time.sleep(1);continue
+                    registry.connected.clear();connected=False;health(registry,dispatcher.device);time.sleep(1);continue
                 registry.connected.set()
                 if not connected:registry.reconnect();control.reconnect();connected=True
                 try:
                     dispatcher.small();dispatcher.images()
                 except (OSError,TimeoutError) as error:
-                    print('USB delivery unavailable: '+type(error).__name__+'; replaying on reconnect',flush=True)
+                    print('Display delivery unavailable: '+type(error).__name__+'; replaying on reconnect',flush=True)
                     connected=False;time.sleep(1)
                 if time.monotonic()>=health_due:
-                    health(registry,args.device);health_due=time.monotonic()+2
+                    health(registry,dispatcher.device);health_due=time.monotonic()+2
                 time.sleep(.25)
-        finally:registry.close()
+        finally:registry.close();close_bluetooth()
 if __name__=='__main__':main()

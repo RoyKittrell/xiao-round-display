@@ -20,6 +20,7 @@
 #include <Adafruit_GC9A01A.h>
 #include "WatchFace.h"
 #include "WatchDirty.h"
+#include "FrameTiles.h"
 #include "ui/WatchCollection.h"
 #include "ui/WatchInput.h"
 #include "ui/WatchTitleRenderer.h"
@@ -32,9 +33,12 @@
 #include "PrinterRenderer.h"
 #include "star_systems/Renderer.h"
 #include "npm1300.h"
+#include "HostLink.h"
+HostLink hostLink;
+#define Serial hostLink
 Adafruit_GC9A01A lcd(PIN_D1, PIN_D3, PIN_D10, PIN_D8, -1);
 GFXcanvas16 cv(240,240);
-GFXcanvas16 previous(240,240);
+FrameTiles frameTiles;
 GFXcanvas16 moonImage(240,240);
 GFXcanvas16 sunImage(240,240);
 GFXcanvas1 textMask(240,240);
@@ -43,7 +47,7 @@ TouchContact touchContact;
 TouchCoordinates touchCoordinates;
 TouchCalibration touchCalibration;
 DisplayBusHealth displayBus;
-const char* firmwareTag="public-template-r25";
+const char* firmwareTag="public-template-r26";
 volatile bool touchReportPending=true;
 void touchReportReady(){touchReportPending=true;}
 bool traceTouch=false;
@@ -328,6 +332,8 @@ void input(){
  }else touchSample(contact.down,mapped.x,mapped.y);
  }
  while(Serial.available()){char c=Serial.read();
+ static uint16_t hostEpoch=0;
+ if(hostEpoch!=Serial.epoch()){receivingPacket=receivingTime=false;packetLength=timeInputLength=0;hostEpoch=Serial.epoch();}
  if(receivingPacket){
   if(c=='\n'){packet[packetLength]=0;receivingPacket=false;handleSunPacket();}
   else if(c!='\r'&&packetLength<1099)packet[packetLength++]=c;
@@ -343,7 +349,7 @@ void input(){
   continue;
  }
  if(c=='T'){receivingTime=true;timeInputLength=0;continue;}
- if(c=='?'){Serial.print("FIRMWARE ");Serial.println(firmwareTag);Serial.print("TOUCH MAP ");Serial.println(touchCoordinates.orientation);printDisplayBus();printClock();printLighting();printDisplaySchedule();Serial.print("BACKLIGHT PWM ");Serial.print(appliedPWM);Serial.println("/4095");printSpaceStatus();continue;}
+ if(c=='?'){Serial.print("FIRMWARE ");Serial.println(firmwareTag);Serial.diagnostics();Serial.print("TOUCH MAP ");Serial.println(touchCoordinates.orientation);printDisplayBus();printClock();printLighting();printDisplaySchedule();Serial.print("BACKLIGHT PWM ");Serial.print(appliedPWM);Serial.println("/4095");printSpaceStatus();continue;}
  if(c=='c'){startTouchCalibration();continue;}
  if(c=='+'||c=='-'){adjustBrightness(c=='+'?5:-5);continue;}
  if(c=='v'){lighting.overrideMode=AppearanceOverride((int(lighting.overrideMode)+1)%3);serviceLighting();printLighting();continue;}
@@ -354,6 +360,7 @@ void input(){
  if(c=='d'&&mode==7){starPlayback.toggleDemo(millis());starRenderer.resetTrails();Serial.print("STAR DEMO ");Serial.println(starPlayback.demo?"ON":"OFF");continue;}
  if(c=='h'&&mode==7){if(starPlayback.system==StarSystems::System::HR)toggleHistoricalTransfer();continue;}
  if(c=='p'){selectScene(10);}else if(c=='0'){selectScene(9);}else if(c>='3'&&c<='9'){selectScene(c-'1');}else if(c=='n')switchMode();else if(c=='r')simulateDisplayReset();else if(c=='j'){selectScene(3);previewMonth=6;previewDay=21;}else if(c=='e'){selectScene(3);previewMonth=9;previewDay=23;}else if(c=='l'){selectScene(3);}}
+ Serial.endResponse();
 }
 bool acceleration(){uint8_t d[6];if(imuOK&&readRegs(Wire1,0x6a,0x28,d,6)){ax=(int16_t)(d[0]|d[1]<<8)*0.000061f;ay=(int16_t)(d[2]|d[3]<<8)*0.000061f;az=(int16_t)(d[4]|d[5]<<8)*0.000061f;return true;}return false;}
 void clockFace(){
@@ -620,10 +627,10 @@ void drawRegion(int left,int top,int right,int bottom){
  lcd.startWrite();lcdWindowFast(left,top,right,bottom);
  // The verified software SPI pin mapping, with direct GPIO writes for pixels.
  // P1.06=MOSI and P1.04=SCK. Keep clock low between bits (SPI mode 0).
- const uint16_t* pixels=cv.getBuffer();uint16_t* old=previous.getBuffer();int drawingMode=mode;
+ const uint16_t* pixels=cv.getBuffer();int drawingMode=mode;
  for(int yy=top;yy<=bottom;yy++){
  for(int xx=left;xx<=right;xx++){
-  int i=yy*240+xx;uint16_t word=pixels[i];old[i]=word;
+  int i=yy*240+xx;uint16_t word=pixels[i];
   lcdPixel(word);
  }
  if((yy-top+1)%8==0&&yy<bottom){
@@ -698,7 +705,7 @@ void simulateDisplayReset(){
 }
 void setup(){
  pinMode(PIN_D6,OUTPUT);digitalWrite(PIN_D6,LOW);
- Serial.begin(115200);pinMode(PIN_BUTTON,INPUT_PULLUP);pinMode(PIN_D7,INPUT_PULLUP);
+ Serial.begin(115200);bool bluetoothStarted=Serial.beginBluetooth();pinMode(PIN_BUTTON,INPUT_PULLUP);pinMode(PIN_D7,INPUT_PULLUP);
  pinMode(PIN_IMU_CS,OUTPUT);digitalWrite(PIN_IMU_CS,HIGH);delay(10);
  npm1300_begin();bool rail=npm1300_imu_mic_power_enable(true);delay(50);
  Wire1.begin();Wire1.setClock(400000);uint8_t who=0;
@@ -714,17 +721,29 @@ void setup(){
  scheduledWakeRepaint=!displaySleeping;
  pinMode(PIN_D6,OUTPUT);analogWriteResolution(12);analogWriteFrequency(2000);serviceLighting();lcd.begin(16000000);lcd.setRotation(0);
  if(displaySleeping){lcd.sendCommand(GC9A01A_DISPOFF);lcd.sendCommand(GC9A01A_SLPIN);}
- if(!cv.getBuffer()||!previous.getBuffer()||!moonImage.getBuffer()||!sunImage.getBuffer()||!textMask.getBuffer()){Serial.println("ERROR framebuffer allocation");while(1)delay(1000);}
+ if(!cv.getBuffer()||!moonImage.getBuffer()||!sunImage.getBuffer()||!textMask.getBuffer()){Serial.println("ERROR framebuffer allocation");while(1)delay(1000);}
  watches.enter(millis());sceneRotation.reset(millis());Serial.print("Playground ready. IMU=");Serial.print(imuOK);Serial.print(" RTC=");Serial.println(rtcOK);
  Serial.print("FIRMWARE ");Serial.println(firmwareTag);
+ Serial.println(bluetoothStarted?"BLUETOOTH ready":"BLUETOOTH unavailable");
 }
-void loop(){printerStatus.tick(millis());codexUsage.tick(millis());serviceClock();serviceUsbPower(false);serviceDisplaySchedule();serviceLighting();serviceDisplayRecovery();accelerationFresh=acceleration();input();
+void loop(){Serial.serviceBluetooth();
+ static bool wasPairing=false;bool pairing=Serial.pairingVisible();
+ if(pairing!=wasPairing){wasPairing=pairing;firstFrame=true;}
+ printerStatus.tick(millis());codexUsage.tick(millis());serviceClock();serviceUsbPower(false);serviceDisplaySchedule();serviceLighting();serviceDisplayRecovery();accelerationFresh=acceleration();input();
  if(sunReceiving&&millis()-sunPacketAt>5000){sunReceiving=false;sunReady=false;Serial.println("ERR solar transfer timeout");}
+ // Give service discovery/pairing the radio time it needs. Keep input and
+ // the running clock serviced, and draw a changed pairing card once.
+ if(Serial.authenticating()&&!firstFrame){delay(1);return;}
  if(displaySleeping){delay(2);return;}
  if(millis()-lastFrame<40)return;lastFrame=millis();uint32_t frameStart=micros();int frameMode=mode;
  advanceInfoFade();if(mode!=2&&mode!=7&&mode!=8)cv.fillScreen(BG);
 
- if(touchCalibration.active())renderTouchCalibration();
+ if(Serial.pairingVisible()){
+  cv.fillScreen(0);text(120,70,"PAIR BLUETOOTH",1,GOLD);
+  text(120,100,"ENTER THIS CODE ON MAC",1);text(120,135,Serial.pairingPIN(),3);
+  text(120,175,"XIAO ROUND DISPLAY",1);
+ }
+ else if(touchCalibration.active())renderTouchCalibration();
  else switch(mode){case 2:clockFace();break;case 3:analemma();break;case 4:moon();break;case 5:solarSystem();break;case 6:sun();break;case 7:starScene();break;case 8:lifeScene();break;case 9:codexScene();break;case 10:printerScene();break;}
  if(!touchCalibration.active())brightnessOverlay();
  auto frameWatchStyle=watches.style;auto frameStarSystem=starPlayback.system;
@@ -733,23 +752,14 @@ void loop(){printerStatus.tick(millis());codexUsage.tick(millis());serviceClock(
  static uint32_t watchFrames=0,watchUs=0,watchRenderUs=0,watchMaxUs=0,watchPixels=0,watchWindows=0,watchSince=0;
  static int metricsMode=-1;
  if(metricsMode!=mode){metricsMode=mode;watchSince=0;watchFrames=watchUs=watchRenderUs=watchMaxUs=watchPixels=watchWindows=0;}
- if((mode==2||mode==7||mode==8)&&!firstFrame){
-  int rectangles=0;
-  WatchDirty::flush(cv.getBuffer(),previous.getBuffer(),[&](int l,int t,int r,int b){
-   watchPixels+=(r-l+1)*(b-t+1);watchWindows++;
-   drawRegion(l,t,r,b);
-   if(++rectangles%4==0){accelerationFresh=acceleration();input();}
-   return mode==frameMode&&!firstFrame;
-  });
- }else{
- int left=240,top=240,right=-1,bottom=-1;
- const uint16_t* now=cv.getBuffer();uint16_t* old=previous.getBuffer();
- for(int yy=0;yy<240;yy++)for(int xx=0;xx<240;xx++){
-  int i=yy*240+xx;if(firstFrame||now[i]!=old[i]){left=min(left,xx);right=max(right,xx);top=min(top,yy);bottom=max(bottom,yy);}
- }
- firstFrame=false;
- if(right>=left)drawRegion(left,top,right,bottom);
- }
+ bool forceFrame=firstFrame;firstFrame=false;
+ int rectangles=0;
+ bool complete=frameTiles.flush(cv.getBuffer(),forceFrame,[&](int l,int t,int r,int b){
+  watchPixels+=(r-l+1)*(b-t+1);watchWindows++;drawRegion(l,t,r,b);
+  if(++rectangles%4==0){accelerationFresh=acceleration();input();}
+  return mode==frameMode&&!firstFrame;
+ });
+ if(!complete)firstFrame=true;
  if(recoveryRow<240){
   int rows=(mode==2||mode==7||mode==8)?4:8;drawRegion(0,recoveryRow,239,min(recoveryRow+rows-1,239));recoveryRow+=rows;
  }

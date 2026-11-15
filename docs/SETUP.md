@@ -100,8 +100,10 @@ while main power is absent.
 ## 5. Build the menu app
 
 Install Xcode Command Line Tools (`xcode-select --install`) and Python 3.10 or
-newer. Use a persistent virtual environment; the installed app records that
-interpreter's path and will need rebuilding if you move/delete the environment.
+newer. Create a dedicated virtual environment for this project. Installation
+copies its dependencies into the helper's Application Support folder, so login
+startup does not read a virtual environment in Documents. Keep the underlying
+Python installation available; this is not a standalone Python distribution.
 
 ```sh
 python3 -m venv .venv
@@ -131,7 +133,19 @@ or deletion by its owner. The installer manages one menu helper per Mac.
 Manual backend test instances can use separate data directories and serial
 devices; do not run two workers against one USB port.
 
-## 6. Connect optional sources
+## 6. Optional Bluetooth connection (experimental)
+
+Start with USB and verify scene selection and brightness first. Then follow
+[BLUETOOTH.md](BLUETOOTH.md) to discover and explicitly pair your own display.
+No Bluetooth device is preselected, and a fresh helper does not scan until
+requested. The controller has Bluetooth LE and no Wi-Fi.
+
+Bluetooth controls were exercised on the originating hardware; the final
+package's permission/reconnection check remains pending. Keep USB available
+while setting up. Changing rendering code or adding a new animation still
+requires a USB firmware upload.
+
+## 7. Connect optional sources
 
 ### Codex
 
@@ -161,7 +175,7 @@ Enable `sun` to download NASA He II 304 Å imagery and NOAA observations. These
 requests are public and do not need user credentials. Missing/stale fields are
 shown as unavailable/old. No captured readings are included in this repository.
 
-## 7. Offline checks
+## 8. Offline checks
 
 Install development dependencies, then run:
 
@@ -174,3 +188,19 @@ Clang/C++17 is required for firmware parser/renderer harnesses. On macOS, Swift
 profile checks and the off-screen native-menu benchmark also run. This validates
 code and packet behavior without querying real accounts, contacting a printer,
 flashing hardware or installing a login service.
+
+## 9. Touch check
+
+Check the top double-tap, centre tap and brightness swipe on your own panel.
+If coordinates are wrong, stop the helper, open Serial Monitor at115200 baud
+and send `c`. Hold each of the four gold dots until captured, lifting your
+finger between dots. The calibration result is printed to serial; calibration
+is in memory and does not persist across reset. If a nonzero orientation is
+needed, keep that result in your local `TouchCoordinates.orientation` default
+in `XiaoPlayground/TouchCalibration.h`, then rebuild. Close Serial Monitor before
+restarting the helper.
+
+Touch and RTC share I²C. Automatic bus recovery is included, but intermittent
+SDA-low stalls have occurred on the originating hardware. Check power and
+connections and try a full power cycle if both stop responding; this is not a
+claim that every panel fault is recoverable in software.

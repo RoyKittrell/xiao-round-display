@@ -11,6 +11,9 @@ Local state is in `~/Library/Application Support/XIAO Display Helper/`:
 | settings.json | Explicit device, source and civil-time/location settings |
 | display-preferences.json | Scene inclusion, carousel, appearance, power and brightness requests |
 | display-profiles.json | Named settings snapshots |
+| display-connection.json | Locally chosen transport and macOS Bluetooth device UUID |
+| bluetooth-status.json | Local discovery/connection phase |
+| python-runtime/ | Installed Python dependencies; no source credentials are copied |
 | private/bambu.json | User's printer address, serial and LAN access code |
 | private/bambu.pem | Pinned printer certificate |
 | assets/codex_usage, assets/bambu, assets/sun | Fetched data caches |
@@ -38,3 +41,11 @@ connection to those landmarks is retained.
 
 If a secret is committed accidentally, removing it in a later commit is not
 enough: revoke it and address repository history before wider distribution.
+
+Bluetooth scanning happens only after an explicit menu request or when a saved
+Bluetooth connection is selected. Connections target the locally chosen UUID;
+no other user's device is built in. The firmware requires an authenticated,
+encrypted link for control/data writes and can retain bonds on the board.
+Display packets contain the same scene/status data as USB, never printer LAN
+codes or Codex authentication tokens. Bluetooth does not fetch internet data
+independently and provides no firmware-update service.
