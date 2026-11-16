@@ -3,6 +3,11 @@
 A customizable desk display for the **Seeed Studio XIAO nRF54LM20A Sense** and
 **240 × 240 Seeed Round Display**, with a native **Swift/AppKit macOS menu bar app**.
 
+![Animated preview of XIAO Round Display clocks, astronomy, Game of Life and status scenes](docs/media/xiao-display-showcase.gif)
+
+*26-second firmware-renderer preview in a stylised bezel. Usage and printer data
+are illustrative; animation time is accelerated. [How this GIF is made](docs/media/README.md).*
+
 This is a blank, user-configurable template. It contains the working scene and
 control code, with **no configured device, accounts, printer, location, saved
 profiles, live readings or enabled network feeds**. Integrations are opt-in.

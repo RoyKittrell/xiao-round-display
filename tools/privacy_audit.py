@@ -1,8 +1,11 @@
 """Conservative audit of publishable files; report paths, never matching values."""
 from pathlib import Path
-import re,subprocess,sys
+import re,subprocess,sys,hashlib
 ROOT=Path(__file__).resolve().parents[1]
 EXCLUDED={'.git','.venv','__pycache__','build','dist'}
+# Renderer-generated media reviewed for synthetic data. A replacement must be
+# visually/privacy reviewed before this exact fingerprint is updated.
+REVIEWED_MEDIA={'docs/media/xiao-display-showcase.gif':'dd8205b091c175a74f15963fa1499611f00e75f29931e44443b7374c58e8451f'}
 
 def audit(paths):
     errors=[]
@@ -18,6 +21,11 @@ def audit(paths):
         if any(p in EXCLUDED for p in rel.parts):continue
         if path.name in forbidden_names or 'private' in rel.parts or any(part.startswith('python-runtime') for part in rel.parts) or path.suffix.lower() in ('.pem','.key','.p12','.elf','.hex','.bin','.uf2','.pyc','.zip'):
             errors.append((str(rel),'local/generated/credential file'));continue
+        if str(rel) in REVIEWED_MEDIA:
+            data=path.read_bytes()
+            if len(data)>4*1024*1024 or data[:6] not in (b'GIF87a',b'GIF89a') or hashlib.sha256(data).hexdigest()!=REVIEWED_MEDIA[str(rel)]:
+                errors.append((str(rel),'media changed; repeat visual/privacy review'))
+            continue
         try:text=path.read_text()
         except UnicodeDecodeError:errors.append((str(rel),'unreviewed binary'));continue
         if any(re.search(pattern,text) for pattern in patterns):errors.append((str(rel),'possible personal path/address/secret'))
