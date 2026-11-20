@@ -7,7 +7,7 @@ APP_NAME='XIAO Display Helper'
 DATA_ROOT=Path(os.environ.get('XIAO_DISPLAY_DATA_DIR',Path.home()/'Library/Application Support'/APP_NAME))
 DEFAULTS={'schema_version':1,'device':'','enabled_sources':[],'utc_offset_minutes':0,
           'location_label':'Location not set','latitude':None,'longitude':None}
-SOURCES=('codex','bambu','sun')
+SOURCES=('codex','bambu','sun','weather')
 
 def validate(value):
     if not isinstance(value,dict):raise ValueError('Settings must be an object')

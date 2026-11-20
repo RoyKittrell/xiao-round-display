@@ -2,6 +2,7 @@
 #include "UserSettings.h"
 #include <Wire.h>
 #include <SPI.h>
+#include "BoardPlatform.h"
 #include "SeasonalAnalemma.h"
 #include "TouchNavigation.h"
 #include "TouchContact.h"
@@ -16,6 +17,7 @@
 #include "SunInformation.h"
 #include "SunSnapshot.h"
 #include <Adafruit_GFX.h>
+#include "DisplayCanvas.h"
 #include <Fonts/FreeSansBold9pt7b.h>
 #include <Adafruit_GC9A01A.h>
 #include "WatchFace.h"
@@ -31,23 +33,40 @@
 #include "GameOfLife.h"
 #include "CodexUsageRenderer.h"
 #include "PrinterRenderer.h"
+#include "WeatherRenderer.h"
 #include "star_systems/Renderer.h"
-#include "npm1300.h"
 #include "HostLink.h"
+#include "SunImageStore.h"
 HostLink hostLink;
+#ifdef Serial
+#undef Serial
+#endif
 #define Serial hostLink
+#if defined(ARDUINO_ARCH_ESP32)
+Adafruit_GC9A01A lcd(PIN_D1,PIN_D3,-1);
+SunImageStore sunStore;
+#else
 Adafruit_GC9A01A lcd(PIN_D1, PIN_D3, PIN_D10, PIN_D8, -1);
-GFXcanvas16 cv(240,240);
+#endif
+DisplayCanvas16 cv(240,240);
 FrameTiles frameTiles;
-GFXcanvas16 moonImage(240,240);
+DisplayCanvas16 moonImage(240,240);
+#if !defined(ARDUINO_ARCH_ESP32)
 GFXcanvas16 sunImage(240,240);
+#endif
 GFXcanvas1 textMask(240,240);
 TouchNavigation touchNavigation;
 TouchContact touchContact;
 TouchCoordinates touchCoordinates;
 TouchCalibration touchCalibration;
 DisplayBusHealth displayBus;
-const char* firmwareTag="public-template-r26";
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+const char* firmwareTag="esp32s3-public-r34-wifi";
+#elif defined(ARDUINO_ARCH_ESP32)
+const char* firmwareTag="esp32c6-public-r34-wifi";
+#else
+const char* firmwareTag="nrf54-public-r34";
+#endif
 volatile bool touchReportPending=true;
 void touchReportReady(){touchReportPending=true;}
 bool traceTouch=false;
@@ -55,7 +74,7 @@ bool accelerationFresh=false;
 bool firstFrame=true;
 const uint16_t BG=0x0843, WHITE=0xffff, CYAN=0x07ff, GOLD=0xfd20;
 // IDs 0/1 are retired. USB3-9 retained; USB0 selects Codex usage; USBp selects printer status.
-const char* names[]={"ROUND CLOCK","ANALEMMA","MOON","SOLAR SYSTEM","SUN","STAR SYSTEMS","GAME OF LIFE","CODEX USAGE","BAMBU PRINTER"};
+const char* names[]={"ROUND CLOCK","ANALEMMA","MOON","SOLAR SYSTEM","SUN","STAR SYSTEMS","GAME OF LIFE","CODEX USAGE","BAMBU PRINTER","WEATHER"};
 constexpr int firstScene=2,sceneCount=sizeof(names)/sizeof(names[0]);
 int mode=firstScene;
 int previewMonth=0,previewDay=0;
@@ -79,6 +98,8 @@ static_assert(sceneCount==SceneControl::Count,"Update menu scene catalog when ad
 GameOfLife life;
 CodexUsage codexUsage;
 PrinterStatus printerStatus;
+WeatherStatus weatherStatus;
+int weatherHorizon=12;
 bool displaySleeping=false;
 bool scheduledWakeRepaint=false;
 uint8_t usbPowerStatus=0;
@@ -97,17 +118,25 @@ bool infoTarget=false;uint8_t infoOpacity=0;uint32_t fadeTick=0;
 bool compressedOrbits=true;
 SunMeta sunMeta=sunSnapshotMeta,pendingSunMeta={};
 bool sunReady=false,sunReceiving=false;uint8_t sunRows[240]={};int sunRowCount=0;
-uint32_t sunPacketAt=0;char packet[1100];bool receivingPacket=false;int packetLength=0;
+uint32_t sunPacketAt=0;char packet[2400];bool receivingPacket=false;int packetLength=0;
 Celestial::MoonDetails moonFacts={};uint32_t moonFactsEpoch=0;
 
 uint8_t bcd(int n){return (n/10)*16+n%10;}
 int dec(uint8_t n){return (n>>4)*10+(n&15);}
-bool displayLinesReleased(){return digitalRead(PIN_D4)==HIGH&&digitalRead(PIN_D5)==HIGH;}
+bool displayLinesReleased(){return Board::pinLevel(PIN_D4)==HIGH&&Board::pinLevel(PIN_D5)==HIGH;}
 bool readRegs(TwoWire &bus,uint8_t addr,uint8_t reg,uint8_t* data,int n){
  // These calls start only between complete synchronous transactions. A line
  // already held low cannot accept START; avoid the core's long timeout so a
  // failed touch/RTC chip cannot freeze the independently rendered clock.
  if(&bus==&Wire&&!displayLinesReleased())return false;
+#if defined(ARDUINO_ARCH_ESP32)
+ // CHSC6X reports are read directly, as in Seeed's driver; writing a register
+ // prefix before a repeated-start can wedge this target on ESP32 I2C.
+ if(&bus==&Wire&&addr==0x2e){
+  if(bus.requestFrom(addr,uint8_t(n))!=n)return false;
+  for(int i=0;i<n;i++)data[i]=bus.read();return true;
+ }
+#endif
  bus.beginTransmission(addr);bus.write(reg);if(bus.endTransmission(false))return false;
  bus.requestFrom(addr,(uint8_t)n);if(bus.available()<n)return false;
  for(int i=0;i<n;i++)data[i]=bus.read();return true;
@@ -117,8 +146,8 @@ void printDisplayBus(){
  Serial.print(" failures=");Serial.print(displayBus.failures);
  Serial.print(" recoveries=");Serial.print(displayBus.recoveries);
  Serial.print(" good_age_ms=");Serial.print(displayBus.goodAge(millis()));
- Serial.print(" SDA=");Serial.print(digitalRead(PIN_D4));
- Serial.print(" SCL=");Serial.println(digitalRead(PIN_D5));
+ Serial.print(" SDA=");Serial.print(Board::pinLevel(PIN_D4));
+ Serial.print(" SCL=");Serial.println(Board::pinLevel(PIN_D5));
 }
 bool releaseDisplayLine(uint8_t pin){
  pinMode(pin,INPUT_PULLUP);uint32_t began=micros();
@@ -137,8 +166,7 @@ void recoverDisplayBus(){
   lowDisplayLine(PIN_D5);lowDisplayLine(PIN_D4);
   releaseDisplayLine(PIN_D5);delayMicroseconds(5);releaseDisplayLine(PIN_D4);
  }
- Wire.begin();Wire.setClock(100000);
- pinMode(PIN_D4,INPUT_PULLUP);pinMode(PIN_D5,INPUT_PULLUP);
+ Board::beginDisplayBus();
  touchContact=TouchContact();touchNavigation=TouchNavigation();brightnessGesture.reset();
  touchReportPending=true;
  displayBus.didRecover(millis());clockPollMs=millis()-1000;
@@ -247,11 +275,20 @@ void printerScene(){
  }
  cv.drawRGBBitmap(0,0,moonImage.getBuffer(),240,240);
 }
+void weatherScene(){
+ static uint32_t drawnMinute=0,drawnRevision=0;static int drawnHorizon=0;
+ if(mediaOwner!=11||drawnMinute!=clockSeconds/60||drawnRevision!=weatherStatus.revision()||drawnHorizon!=weatherHorizon){
+  WeatherView::render(moonImage.getBuffer(),weatherStatus,unixClock(),weatherHorizon);
+  mediaOwner=11;drawnMinute=clockSeconds/60;drawnRevision=weatherStatus.revision();drawnHorizon=weatherHorizon;
+ }
+ cv.drawRGBBitmap(0,0,moonImage.getBuffer(),240,240);
+}
 void sceneTap(int tapX,int tapY){
  if(mode==2){auto action=WatchUI::tap(tapX,tapY);if(action==WatchUI::Tap::NextFace)nextWatchStyle();}
  else if(mode==4||mode==6){infoTarget=!infoTarget;fadeTick=millis();Serial.print("TAP INFO ");Serial.println(infoTarget);}
  else if(mode==5){compressedOrbits=!compressedOrbits;mediaOwner=-1;}
  else if(mode==9){codexUsage.next();}
+ else if(mode==11){weatherHorizon=weatherHorizon==12?24:12;Serial.print("WEATHER HORIZON ");Serial.println(weatherHorizon);}
  else if(mode==8){life.reseed(millis(),clockSeconds^micros());Serial.println("LIFE reseeded");}
  else if(mode==7){
   auto action=StarSystems::tap(starPlayback.system,tapX,tapY);
@@ -326,7 +363,7 @@ void input(){
   if(event!=TouchCalibration::None)firstFrame=true;
   if(event==TouchCalibration::Captured){auto p=touchCalibration.rawPoint(touchCalibration.index());Serial.print("CALIBRATION DOT ");Serial.print(touchCalibration.index()+1);Serial.print(" raw=");Serial.print(p.x);Serial.print(",");Serial.println(p.y);}
   if(event==TouchCalibration::Complete){
-   touchCoordinates.orientation=touchCalibration.result;touchNavigation.sceneChanged();watches.enter(millis());
+   touchCoordinates.orientation=touchCalibration.result;Board::saveTouch(touchCoordinates.orientation);touchNavigation.sceneChanged();watches.enter(millis());
    Serial.print("CALIBRATION COMPLETE orientation=");Serial.print(touchCalibration.result);Serial.print(" error=");Serial.println(touchCalibration.error);
   }else if(event==TouchCalibration::Failed){Serial.print("CALIBRATION FAILED error=");Serial.println(touchCalibration.error);}
  }else touchSample(contact.down,mapped.x,mapped.y);
@@ -336,8 +373,8 @@ void input(){
  if(hostEpoch!=Serial.epoch()){receivingPacket=receivingTime=false;packetLength=timeInputLength=0;hostEpoch=Serial.epoch();}
  if(receivingPacket){
   if(c=='\n'){packet[packetLength]=0;receivingPacket=false;handleSunPacket();}
-  else if(c!='\r'&&packetLength<1099)packet[packetLength++]=c;
-  else if(packetLength>=1099){receivingPacket=false;Serial.println("ERR packet too long");}
+  else if(c!='\r'&&packetLength<int(sizeof(packet))-1)packet[packetLength++]=c;
+  else if(packetLength>=int(sizeof(packet))-1){receivingPacket=false;Serial.println("ERR packet too long");}
   continue;
  }
  if(c=='@'){receivingPacket=true;packetLength=0;continue;}
@@ -349,7 +386,11 @@ void input(){
   continue;
  }
  if(c=='T'){receivingTime=true;timeInputLength=0;continue;}
- if(c=='?'){Serial.print("FIRMWARE ");Serial.println(firmwareTag);Serial.diagnostics();Serial.print("TOUCH MAP ");Serial.println(touchCoordinates.orientation);printDisplayBus();printClock();printLighting();printDisplaySchedule();Serial.print("BACKLIGHT PWM ");Serial.print(appliedPWM);Serial.println("/4095");printSpaceStatus();continue;}
+ if(c=='?'){Serial.print("FIRMWARE ");Serial.println(firmwareTag);Serial.diagnostics();
+#if defined(ARDUINO_ARCH_ESP32)
+ Serial.wifiStatus();
+#endif
+ Serial.print("TOUCH MAP ");Serial.println(touchCoordinates.orientation);printDisplayBus();printClock();printLighting();printDisplaySchedule();Serial.print("BACKLIGHT PWM ");Serial.print(appliedPWM);Serial.println("/4095");printSpaceStatus();continue;}
  if(c=='c'){startTouchCalibration();continue;}
  if(c=='+'||c=='-'){adjustBrightness(c=='+'?5:-5);continue;}
  if(c=='v'){lighting.overrideMode=AppearanceOverride((int(lighting.overrideMode)+1)%3);serviceLighting();printLighting();continue;}
@@ -359,12 +400,20 @@ void input(){
  if(c=='d'&&mode==2){toggleWatchDemo();continue;}
  if(c=='d'&&mode==7){starPlayback.toggleDemo(millis());starRenderer.resetTrails();Serial.print("STAR DEMO ");Serial.println(starPlayback.demo?"ON":"OFF");continue;}
  if(c=='h'&&mode==7){if(starPlayback.system==StarSystems::System::HR)toggleHistoricalTransfer();continue;}
- if(c=='p'){selectScene(10);}else if(c=='0'){selectScene(9);}else if(c>='3'&&c<='9'){selectScene(c-'1');}else if(c=='n')switchMode();else if(c=='r')simulateDisplayReset();else if(c=='j'){selectScene(3);previewMonth=6;previewDay=21;}else if(c=='e'){selectScene(3);previewMonth=9;previewDay=23;}else if(c=='l'){selectScene(3);}}
+ if(c=='w'){selectScene(11);}else if(c=='p'){selectScene(10);}else if(c=='0'){selectScene(9);}else if(c>='3'&&c<='9'){selectScene(c-'1');}else if(c=='n')switchMode();else if(c=='r')simulateDisplayReset();else if(c=='j'){selectScene(3);previewMonth=6;previewDay=21;}else if(c=='e'){selectScene(3);previewMonth=9;previewDay=23;}else if(c=='l'){selectScene(3);}}
  Serial.endResponse();
 }
-bool acceleration(){uint8_t d[6];if(imuOK&&readRegs(Wire1,0x6a,0x28,d,6)){ax=(int16_t)(d[0]|d[1]<<8)*0.000061f;ay=(int16_t)(d[2]|d[3]<<8)*0.000061f;az=(int16_t)(d[4]|d[5]<<8)*0.000061f;return true;}return false;}
+bool acceleration(){
+#if !defined(ARDUINO_ARCH_ESP32)
+ uint8_t d[6];if(imuOK&&readRegs(Wire1,0x6a,0x28,d,6)){ax=(int16_t)(d[0]|d[1]<<8)*0.000061f;ay=(int16_t)(d[2]|d[3]<<8)*0.000061f;az=(int16_t)(d[4]|d[5]<<8)*0.000061f;return true;}
+#endif
+ return false;
+}
 void clockFace(){
  clockTick();
+ if(!watches.enabledMask){
+  watches.title.dismiss();cv.fillScreen(0);text(120,97,"NO CLOCK FACES",1,WHITE);text(120,119,"Choose faces in the",1,WHITE);text(120,135,"Mac helper menu",1,WHITE);return;
+ }
  if(watches.title.tick(millis())){firstFrame=true;Serial.println("WATCH TITLE END");}
  if(watches.advanceDemo(millis()))watchSelectionChanged();
  if(mediaOwner!=2){WatchFace::dial(moonImage.getBuffer(),watches.style,lighting.appearance);mediaOwner=2;}
@@ -429,7 +478,7 @@ void moon(){
  if(renderedJD<0||mediaOwner!=4||fabs(jd-renderedJD)>1.0/1440){
   renderedJD=jd;mediaOwner=4;moonFacts=Celestial::moon(date);moonFactsEpoch=clockEpoch(date);auto phase=MoonPhase::calculate(jd);phase.lit=moonFacts.lit;phase.inc=acos(2*phase.lit-1);
   moonImage.fillScreen(0);
-  // Rotate for an observer only after location has been configured.
+  // Optional observer orientation, configured locally.
   float q=UserSettings::HasObserver ? MoonPhase::parallactic(jd,phase,UserSettings::Latitude,UserSettings::Longitude):0;
   float limb=phase.angle-q;
   float lightX=-sinf(limb)*sin(phase.inc),lightY=-cosf(limb)*sin(phase.inc),lightZ=cos(phase.inc);
@@ -514,8 +563,15 @@ void solarSystem(){
  cv.drawRGBBitmap(0,0,moonImage.getBuffer(),240,240);
 }
 void sun(){
- bool live=sunReady&&!sunReceiving;const SunMeta& m=live?sunMeta:sunSnapshotMeta;
+ bool live=sunReady&&!sunReceiving;
+#if defined(ARDUINO_ARCH_ESP32)
+ if(live&&mediaOwner!=6){if(sunStore.load(moonImage.getBuffer()))mediaOwner=6;else sunReady=live=false;}
+ const SunMeta& m=live?sunMeta:sunSnapshotMeta;
+ cv.drawRGBBitmap(0,0,live?moonImage.getBuffer():sunSnapshot,240,240);
+#else
+ const SunMeta& m=live?sunMeta:sunSnapshotMeta;
  cv.drawRGBBitmap(0,0,live?sunImage.getBuffer():sunSnapshot,240,240);
+#endif
  if(!live){text(120,109,"SUN DATA NOT CONNECTED",1,GOLD);text(120,130,"Configure the Mac helper",1,WHITE);}
  if(infoOpacity){
   dimForInformation();SunInformation::Panel panel(m,clockSeconds);
@@ -529,6 +585,7 @@ int hexDigit(char c){if(c>='0'&&c<='9')return c-'0';if(c>='a'&&c<='f')return c-'
 void applyMenuControl(const SceneControl::Settings& next){
   auto old=sceneControl.current();bool changed=sceneControl.apply(next);
   if(changed){
+   if(old.clockMask!=next.clockMask){watches.setMask(next.clockMask,millis());watchSelectionChanged();}
    if(old.mask!=next.mask||old.carousel!=next.carousel||old.seconds!=next.seconds)sceneRotation.reset(millis());
    sceneRotation.configure(next.seconds*1000u,millis());
    lighting.overrideMode=AppearanceOverride(next.appearance);
@@ -538,11 +595,22 @@ void applyMenuControl(const SceneControl::Settings& next){
   }
 }
 void handleSunPacket(){
+#if defined(ARDUINO_ARCH_ESP32)
+ if(packet[0]=='N'&&packet[1]=='|'){
+  bool ok=Serial.provisionWifi(packet);memset(packet,0,sizeof(packet));
+  Serial.println(ok?"ACK N saved; restarting":"ERR WiFi setup rejected");
+  if(ok){delay(200);ESP.restart();}return;
+ }
+#endif
+ if(packet[0]=='W'&&packet[1]=='|'){
+  if(weatherStatus.accept(packet,unixClock()))Serial.println("ACK W");else Serial.println("ERR weather packet");
+  return;
+ }
  if(packet[0]=='C'&&packet[1]=='|'){
   SceneControl::Settings next;
   if(!sceneControl.parse(packet,next)){Serial.println("ERR control packet");return;}
   applyMenuControl(next);
-  Serial.print("ACK C|");Serial.print(next.revision);Serial.print("|");Serial.print(mode);Serial.print("|");Serial.print(next.mask);Serial.print("|");Serial.print(next.carousel?1:0);Serial.print("|");Serial.print(next.seconds);Serial.print("|");Serial.print(lighting.dayBrightness);Serial.print("|");Serial.print(lighting.nightBrightness);Serial.print("|");Serial.print(int(lighting.overrideMode));Serial.print("|");Serial.print(displaySleeping?1:0);Serial.print("|");Serial.print(next.power);Serial.print("|");Serial.println(sceneControl.session());
+  Serial.print("ACK C|");Serial.print(next.revision);Serial.print("|");Serial.print(mode);Serial.print("|");Serial.print(next.mask);Serial.print("|");Serial.print(next.carousel?1:0);Serial.print("|");Serial.print(next.seconds);Serial.print("|");Serial.print(lighting.dayBrightness);Serial.print("|");Serial.print(lighting.nightBrightness);Serial.print("|");Serial.print(int(lighting.overrideMode));Serial.print("|");Serial.print(displaySleeping?1:0);Serial.print("|");Serial.print(next.power);Serial.print("|");Serial.print(sceneControl.session());Serial.print("|");Serial.println(watches.enabledMask);
   return;
  }
  if(packet[0]=='M'&&packet[1]=='|'){
@@ -558,6 +626,9 @@ void handleSunPacket(){
   char* fields[13];int count=0;char* p=strtok(packet,"|");while(p&&count<13){fields[count++]=p;p=strtok(nullptr,"|");}
   if(count!=13){Serial.println("ERR metadata");return;}
   pendingSunMeta.imageEpoch=strtoul(fields[1],nullptr,10);pendingSunMeta.fetchedEpoch=strtoul(fields[2],nullptr,10);pendingSunMeta.kpEpoch=strtoul(fields[3],nullptr,10);pendingSunMeta.scalesEpoch=strtoul(fields[4],nullptr,10);pendingSunMeta.flareEpoch=strtoul(fields[5],nullptr,10);pendingSunMeta.xrayEpoch=strtoul(fields[6],nullptr,10);pendingSunMeta.kp=atof(fields[7]);pendingSunMeta.g=atoi(fields[8]);pendingSunMeta.r=atoi(fields[9]);pendingSunMeta.s=atoi(fields[10]);snprintf(pendingSunMeta.xray,12,"%s",fields[11]);snprintf(pendingSunMeta.flare,12,"%s",fields[12]);
+#if defined(ARDUINO_ARCH_ESP32)
+  if(!sunStore.start()){Serial.println("ERR Sun storage unavailable");return;}
+#endif
   memset(sunRows,0,sizeof(sunRows));sunRowCount=0;sunReceiving=true;Serial.println("ACK B");return;
  }
  if(packet[0]=='P'&&packet[1]=='|'&&sunReceiving){
@@ -567,7 +638,12 @@ void handleSunPacket(){
   int pixels=min(32,240-col),bytes=pixels*2;if(strlen(hex)!=size_t(bytes*2)||strlen(checksum)!=4){Serial.println("ERR patch length");return;}
   uint8_t decoded[64];for(int i=0;i<bytes;i++){int a=hexDigit(hex[2*i]),b=hexDigit(hex[2*i+1]);if(a<0||b<0){Serial.println("ERR hex");return;}decoded[i]=(a<<4)|b;}
   if(rowCRC(decoded,bytes)!=strtoul(checksum,nullptr,16)){Serial.println("ERR CRC");return;}
+#if defined(ARDUINO_ARCH_ESP32)
+  uint16_t words[32];for(int x=0;x<pixels;x++)words[x]=(decoded[2*x]<<8)|decoded[2*x+1];
+  if(!sunStore.write(row,col,words,pixels)){sunReceiving=false;sunStore.cancel();Serial.println("ERR Sun storage write");return;}
+#else
   for(int x=0;x<pixels;x++)sunImage.getBuffer()[row*240+col+x]=(decoded[2*x]<<8)|decoded[2*x+1];
+#endif
   bool complete=sunRows[row]==255;sunRows[row]|=1<<(col/32);if(!complete&&sunRows[row]==255)sunRowCount++;
   Serial.print("ACK P ");Serial.print(row);Serial.print(" ");Serial.println(col);return;
  }
@@ -576,14 +652,24 @@ void handleSunPacket(){
   if(row<0||row>=240||!hex||strlen(hex)!=960||!checksum||strlen(checksum)!=4){Serial.println("ERR row");return;}
   uint8_t decoded[480];for(int i=0;i<480;i++){int a=hexDigit(hex[2*i]),b=hexDigit(hex[2*i+1]);if(a<0||b<0){Serial.println("ERR hex");return;}decoded[i]=(a<<4)|b;}
   if(rowCRC(decoded,480)!=strtoul(checksum,nullptr,16)){Serial.println("ERR CRC");return;}
+#if defined(ARDUINO_ARCH_ESP32)
+  uint16_t words[240];for(int x=0;x<240;x++)words[x]=(decoded[2*x]<<8)|decoded[2*x+1];
+  if(!sunStore.write(row,0,words,240)){sunReceiving=false;sunStore.cancel();Serial.println("ERR Sun storage write");return;}
+#else
   for(int x=0;x<240;x++)sunImage.getBuffer()[row*240+x]=(decoded[2*x]<<8)|decoded[2*x+1];
+#endif
   if(sunRows[row]!=255){sunRows[row]=255;sunRowCount++;}Serial.print("ACK R ");Serial.println(row);return;
  }
- if(packet[0]=='E'&&sunReceiving&&sunRowCount==240){sunMeta=pendingSunMeta;sunReady=true;sunReceiving=false;Serial.println("ACK E");return;}
+ if(packet[0]=='E'&&sunReceiving&&sunRowCount==240){
+#if defined(ARDUINO_ARCH_ESP32)
+  if(!sunStore.commit()){sunReceiving=false;Serial.println("ERR Sun commit");return;}if(mode==6)mediaOwner=-1;
+#endif
+  sunMeta=pendingSunMeta;sunReady=true;sunReceiving=false;Serial.println("ACK E");return;}
  Serial.println("ERR incomplete solar update");
 }
 void printSpaceStatus(){
  Serial.print("SCENE ");Serial.println(names[mode-firstScene]);
+ Serial.print("WEATHER ready=");Serial.print(weatherStatus.ready());Serial.print(" horizon=");Serial.print(weatherHorizon);Serial.print(" stale=");Serial.print(weatherStatus.stale(unixClock()));Serial.print(" observed=");Serial.print(weatherStatus.current().observed);Serial.print(" temperature10=");Serial.print(weatherStatus.current().temperature10);Serial.print(" uv10=");Serial.println(weatherStatus.current().uv10);
  if(mode==2){Serial.print("WATCH FACE ");Serial.println(WatchFace::name(watches.style));Serial.print("WATCH DEMO ");Serial.println(watches.demo?"ON":"OFF");Serial.print("WATCH TITLE ACTIVE ");Serial.println(watches.title.active());}
  if(mode==7){Serial.print("STAR SYSTEM ");Serial.println(StarSystems::Data::Titles[int(starPlayback.system)]);Serial.print("STAR DEMO ");Serial.println(starPlayback.demo?"ON":"OFF");Serial.print("STAR HISTORICAL ");Serial.println(starPlayback.historical?"ON / artistic past transfer":"OFF / present-day");Serial.println("STAR SCHEMATIC expanded separations / source clocks; not a live ephemeris");}
  if(mode==8){Serial.print("LIFE rules=B3/S23 grid=128x128 viewport=60x60 interval_ms=150 generation=");Serial.print(life.generation());Serial.print(" population=");Serial.print(life.alive());Serial.print(" seeds=");Serial.println(life.seeds());}
@@ -592,12 +678,16 @@ void printSpaceStatus(){
  if(codexUsage.count()){Serial.print(" remaining_tenths=");Serial.print(codexUsage.current().remainingTenths);Serial.print(" label=");Serial.print(codexUsage.current().label);Serial.print(" reset_unix=");Serial.print(codexUsage.current().reset);}Serial.println();
  Serial.print("SUN rows=");Serial.print(sunRowCount);Serial.print(" ready=");Serial.print(sunReady);Serial.print(" imageEpoch=");Serial.print(sunReady?sunMeta.imageEpoch:sunSnapshotMeta.imageEpoch);Serial.print(" info=");Serial.println(infoTarget);
  if(mode==6){
+#if defined(ARDUINO_ARCH_ESP32)
+  if(sunReady&&mediaOwner==6){Serial.print("SUN STORAGE CRC16 ");Serial.println(rowCRC(reinterpret_cast<const uint8_t*>(moonImage.getBuffer()),240*240*2),HEX);}
+#endif
   SunInformation::Panel panel(sunReady&&!sunReceiving?sunMeta:sunSnapshotMeta,clockSeconds);
   for(int i=0;i<panel.count;i++){Serial.print("SUN INFO ");Serial.println(panel.rows[i].text);}
  }
  if(mode==4){Serial.print("MOON ");Serial.print(Celestial::phaseName(moonFacts.phase));Serial.print(" lit=");Serial.print(moonFacts.lit*100,2);Serial.print(" next=");Serial.println(moonFacts.name);}
 }
 
+#if !defined(ARDUINO_ARCH_ESP32)
 __attribute__((always_inline)) inline void lcdPixelBit(uint16_t word,uint16_t mask){
  if(word&mask)NRF_P1->OUTSET=1UL<<6;else NRF_P1->OUTCLR=1UL<<6;
  NRF_P1->OUTSET=1UL<<4;NRF_P1->OUTCLR=1UL<<4;
@@ -641,6 +731,16 @@ void drawRegion(int left,int top,int right,int bottom){
  }
  lcd.endWrite();
 }
+#else
+void drawRegion(int left,int top,int right,int bottom){
+ int drawingMode=mode;lcd.startWrite();lcd.setAddrWindow(left,top,right-left+1,bottom-top+1);
+ for(int yy=top;yy<=bottom;yy++){
+  lcd.writePixels(cv.getBuffer()+yy*240+left,right-left+1,true,false);
+  if((yy-top+1)%8==0&&yy<bottom){lcd.endWrite();input();if(mode!=drawingMode)return;lcd.startWrite();lcd.setAddrWindow(left,yy+1,right-left+1,bottom-yy);}
+ }
+ lcd.endWrite();
+}
+#endif
 uint32_t lastRecovery=0,recoveryStarted=0;
 bool waitingForWake=false;
 int recoveryRow=240;
@@ -659,9 +759,15 @@ void serviceDisplayRecovery(){
 void serviceUsbPower(bool force){
  if(!force&&uint32_t(millis()-powerPollAt)<1000)return;
  powerPollAt=millis();uint8_t status=0;
+#if defined(ARDUINO_ARCH_ESP32)
+ // USB host attachment is observable with the hardware CDC build. A charger/battery cannot be
+ // distinguished without an extra sense circuit, so unknown power fails awake.
+ usbPowerReadOK=HWCDC::isConnected();if(usbPowerReadOK)status=1;
+#else
  usbPowerReadOK=npm1300_vbus_status(&status);
+#endif
  if(usbPowerReadOK)usbPowerStatus=status;
- usbPower.observe(usbPowerReadOK,(status&NPM1300_VBUS_STATUS_PRESENT)!=0,millis());
+ usbPower.observe(usbPowerReadOK,(status&1)!=0,millis());
 }
 void printDisplaySchedule(){
  Serial.print("USB POWER ");Serial.print(usbPower.connected(millis())?"PRESENT":"ABSENT/UNKNOWN");
@@ -705,13 +811,27 @@ void simulateDisplayReset(){
 }
 void setup(){
  pinMode(PIN_D6,OUTPUT);digitalWrite(PIN_D6,LOW);
- Serial.begin(115200);bool bluetoothStarted=Serial.beginBluetooth();pinMode(PIN_BUTTON,INPUT_PULLUP);pinMode(PIN_D7,INPUT_PULLUP);
+ Board::setupRadioAntenna();Serial.begin(115200);
+#if defined(CONFIG_IDF_TARGET_ESP32S3)
+ if(!psramFound()||!cv.begin(true)||!moonImage.begin(true)||!sunStore.begin()){
+  while(true){Serial.println("ERROR S3 framebuffer/PSRAM allocation: enable OPI PSRAM");delay(1000);}
+ }
+#endif
+ bool bluetoothStarted=Serial.beginBluetooth();
+#if defined(ARDUINO_ARCH_ESP32)
+ Serial.beginWifi();
+#endif
+ pinMode(PIN_BUTTON,INPUT_PULLUP);pinMode(PIN_D7,INPUT_PULLUP);
+#if !defined(ARDUINO_ARCH_ESP32)
  pinMode(PIN_IMU_CS,OUTPUT);digitalWrite(PIN_IMU_CS,HIGH);delay(10);
  npm1300_begin();bool rail=npm1300_imu_mic_power_enable(true);delay(50);
  Wire1.begin();Wire1.setClock(400000);uint8_t who=0;
  imuOK=rail&&readRegs(Wire1,0x6a,15,&who,1)&&who==0x6a;
  if(imuOK){writeReg(Wire1,0x6a,0x12,0x44);writeReg(Wire1,0x6a,0x10,0x40);}
- Wire.setPins(PIN_D4,PIN_D5);Wire.begin();Wire.setClock(100000);pinMode(PIN_D4,INPUT_PULLUP);pinMode(PIN_D5,INPUT_PULLUP);delay(20);
+#else
+ touchCoordinates.orientation=Board::loadTouch();
+#endif
+ Board::beginDisplayBus();delay(20);
  attachInterrupt(digitalPinToInterrupt(PIN_D7),touchReportReady,FALLING);
 
  clockSeconds=clockEpoch(buildClock);clockTickMs=millis();clockReady=true;
@@ -719,9 +839,16 @@ void setup(){
  serviceUsbPower(true);displaySleeping=sceneControl.displayOff(clockSeconds,usbPower.connected(millis()));
  // Keep the panel dark until its first complete frame is ready.
  scheduledWakeRepaint=!displaySleeping;
- pinMode(PIN_D6,OUTPUT);analogWriteResolution(12);analogWriteFrequency(2000);serviceLighting();lcd.begin(16000000);lcd.setRotation(0);
+#if defined(ARDUINO_ARCH_ESP32)
+ SPI.begin(D8,D9,D10,D1);
+#endif
+ pinMode(PIN_D6,OUTPUT);Board::pwmBegin();serviceLighting();lcd.begin(16000000);lcd.setRotation(0);
  if(displaySleeping){lcd.sendCommand(GC9A01A_DISPOFF);lcd.sendCommand(GC9A01A_SLPIN);}
- if(!cv.getBuffer()||!moonImage.getBuffer()||!sunImage.getBuffer()||!textMask.getBuffer()){Serial.println("ERROR framebuffer allocation");while(1)delay(1000);}
+ if(!cv.getBuffer()||!moonImage.getBuffer()||!textMask.getBuffer()
+#if !defined(ARDUINO_ARCH_ESP32)
+ ||!sunImage.getBuffer()
+#endif
+ ){Serial.println("ERROR framebuffer allocation");while(1)delay(1000);}
  watches.enter(millis());sceneRotation.reset(millis());Serial.print("Playground ready. IMU=");Serial.print(imuOK);Serial.print(" RTC=");Serial.println(rtcOK);
  Serial.print("FIRMWARE ");Serial.println(firmwareTag);
  Serial.println(bluetoothStarted?"BLUETOOTH ready":"BLUETOOTH unavailable");
@@ -730,12 +857,16 @@ void loop(){Serial.serviceBluetooth();
  static bool wasPairing=false;bool pairing=Serial.pairingVisible();
  if(pairing!=wasPairing){wasPairing=pairing;firstFrame=true;}
  printerStatus.tick(millis());codexUsage.tick(millis());serviceClock();serviceUsbPower(false);serviceDisplaySchedule();serviceLighting();serviceDisplayRecovery();accelerationFresh=acceleration();input();
- if(sunReceiving&&millis()-sunPacketAt>5000){sunReceiving=false;sunReady=false;Serial.println("ERR solar transfer timeout");}
+ if(sunReceiving&&millis()-sunPacketAt>5000){sunReceiving=false;sunReady=false;
+#if defined(ARDUINO_ARCH_ESP32)
+ sunStore.cancel();
+#endif
+ Serial.println("ERR solar transfer timeout");}
  // Give service discovery/pairing the radio time it needs. Keep input and
  // the running clock serviced, and draw a changed pairing card once.
  if(Serial.authenticating()&&!firstFrame){delay(1);return;}
  if(displaySleeping){delay(2);return;}
- if(millis()-lastFrame<40)return;lastFrame=millis();uint32_t frameStart=micros();int frameMode=mode;
+ if(millis()-lastFrame<Board::FrameIntervalMs)return;lastFrame=millis();uint32_t frameStart=micros();int frameMode=mode;
  advanceInfoFade();if(mode!=2&&mode!=7&&mode!=8)cv.fillScreen(BG);
 
  if(Serial.pairingVisible()){
@@ -744,7 +875,7 @@ void loop(){Serial.serviceBluetooth();
   text(120,175,"XIAO ROUND DISPLAY",1);
  }
  else if(touchCalibration.active())renderTouchCalibration();
- else switch(mode){case 2:clockFace();break;case 3:analemma();break;case 4:moon();break;case 5:solarSystem();break;case 6:sun();break;case 7:starScene();break;case 8:lifeScene();break;case 9:codexScene();break;case 10:printerScene();break;}
+ else switch(mode){case 2:clockFace();break;case 3:analemma();break;case 4:moon();break;case 5:solarSystem();break;case 6:sun();break;case 7:starScene();break;case 8:lifeScene();break;case 9:codexScene();break;case 10:printerScene();break;case 11:weatherScene();break;}
  if(!touchCalibration.active())brightnessOverlay();
  auto frameWatchStyle=watches.style;auto frameStarSystem=starPlayback.system;
 

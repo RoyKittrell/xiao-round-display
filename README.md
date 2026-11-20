@@ -1,6 +1,7 @@
 # XIAO Round Display
 
-A customizable desk display for the **Seeed Studio XIAO nRF54LM20A Sense** and
+A customizable desk display for **Seeed Studio XIAO ESP32-S3, ESP32-C6 and
+nRF54LM20A Sense** controllers and
 **240 × 240 Seeed Round Display**, with a native **Swift/AppKit macOS menu bar app**.
 
 ![Animated preview of XIAO Round Display clocks, astronomy, Game of Life and status scenes](docs/media/xiao-display-showcase.gif)
@@ -12,11 +13,14 @@ This is a blank, user-configurable template. It contains the working scene and
 control code, with **no configured device, accounts, printer, location, saved
 profiles, live readings or enabled network feeds**. Integrations are opt-in.
 
-The helper supports USB and experimental paired Bluetooth LE for scene selection, profiles,
-appearance, brightness and live data. See [Bluetooth setup](docs/BLUETOOTH.md).
-New rendering code still needs a USB firmware upload. Bluetooth permissions and
-reconnection on the final package, plus complete wireless Sun-image delivery,
-still need physical verification; use USB as the initial/recovery path.
+The native helper identifies the connected controller from its running firmware
+and shows the appropriate USB, Bluetooth and Wi-Fi options. The S3 supports
+certificate-pinned encrypted Wi-Fi control; the C6 Wi-Fi build still needs
+hardware qualification. The nRF54 supports USB/Bluetooth and has no Wi-Fi.
+See [hardware and automatic connection settings](docs/HARDWARE.md),
+[Wi-Fi setup](docs/WIFI.md) and [Bluetooth setup](docs/BLUETOOTH.md).
+New rendering code still needs a USB firmware upload; no wireless updater is
+included. The helper does not guess S3 versus C6 from their shared USB IDs.
 
 ## Scenes
 
@@ -26,6 +30,7 @@ still need physical verification; use USB as the initial/recovery path.
   mass-transfer illustration for HR 6819, available separately from its present view.
 - Conway's Game of Life on a grid extending beyond the circular viewport.
 - Empty Codex-usage and Bambu-printer scenes, ready for the new user's own feeds.
+- Local weather with a 12/24-hour rain ring, larger weather icon, temperature and UV.
 
 The menu bar app provides scene selection, a persistent carousel checklist with
 All/None/mixed states, carousel/hold/interval controls, named Profiles, appearance,
@@ -37,7 +42,7 @@ are preserved separately in `optional_assets/`.
 
 | Part | Quantity |
 |---|---:|
-| XIAO nRF54LM20A Sense, preferably with soldered headers | 1 |
+| One supported XIAO controller (S3, C6 or nRF54LM20A Sense), with headers | 1 |
 | Seeed Round Display for XIAO, 240 × 240 GC9A01A | 1 |
 | USB data cable to the Mac | 1 |
 | Optional CR927 clock-backup cell | 1 |
@@ -45,8 +50,9 @@ are preserved separately in `optional_assets/`.
 The XIAO's USB socket faces outward. The display connects through its XIAO
 sockets. This firmware uses the existing Seeed pinout: D1 LCD CS, D3 LCD DC,
 D8 clock, D10 MOSI, D4/D5 touch/RTC I²C, D7 touch interrupt and D6 backlight.
-The board is **not an ESP32 and has no Wi-Fi**. The Mac fetches live data over
-its network and sends display packets over USB or paired Bluetooth LE.
+The nRF54 board has no Wi-Fi; ESP32 variants do. The Mac fetches the live data
+and sends it over the selected USB/Bluetooth/Wi-Fi connection. Wi-Fi support
+does not make Codex/printer/weather feeds independent of the Mac helper.
 
 ## Start here
 
@@ -114,7 +120,8 @@ transitions require updating the fixed offset; automatic DST is not implemented.
 
 ## Validation and dependencies
 
-The original hardware architecture is retained. This public template's blank
+See [VALIDATION.md](docs/VALIDATION.md) for build, mock and originating-hardware
+evidence, including the remaining C6 Wi-Fi and RTC limitations. This public template's blank
 configuration and build are checked separately; no new user's printer/account
 connection is claimed to have been tested. Run the offline checks described in
 [SETUP.md](docs/SETUP.md) before changing code.

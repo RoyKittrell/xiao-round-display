@@ -71,14 +71,13 @@ class BluetoothSession:
             await client.connect()
             phase('Enabling display replies')
             await client.start_notify(TX,lambda _,data:self.buffer.feed(data))
-            # The protected RX read triggers macOS passkey pairing if needed.
+            # The protected RX write triggers macOS passkey pairing if needed.
             phase('Pairing — check display and macOS prompt')
             await client.read_gatt_char(RX)
             await client.write_gatt_char(RX,b'\n',response=True)
             phase('Connected')
         except BaseException:
-            # Cancellation is also a connection failure; do not strand a peer
-            # after a timeout or leave a half-created client connected.
+            # Cancellation must not strand an authenticated or half-paired peer.
             try:await asyncio.wait_for(client.disconnect(),timeout=3)
             except Exception:pass
             raise
@@ -100,6 +99,8 @@ _sessions={}
 def close_bluetooth():
     for session in _sessions.values():session.close()
     _sessions.clear()
+    from wifi_transport import close_wifi
+    close_wifi()
 
 class BluetoothPort:
     def __init__(self,device,baudrate=115200,timeout=.2,write_timeout=5):
@@ -123,6 +124,9 @@ class BluetoothPort:
         with self.session.buffer.condition:self.session.buffer.data.clear()
 
 def open_port(device,*args,**kwargs):
+    if str(device).startswith('wifi://'):
+        from wifi_transport import WifiPort
+        return WifiPort(device,*args,**kwargs)
     if str(device).startswith('ble://'):return BluetoothPort(device,*args,**kwargs)
     import serial
     return serial.Serial(device,*args,**kwargs)
@@ -130,21 +134,59 @@ def open_port(device,*args,**kwargs):
 def connection(root):
     try:
         value=json.loads((Path(root)/'display-connection.json').read_text())
-        if value.get('mode') not in ('usb','auto','bluetooth'):return {'mode':'usb'}
+        if value.get('mode') not in ('usb','auto','bluetooth','wifi'):return {'mode':'usb'}
         if value.get('bluetooth_id'):value['bluetooth_id']=str(uuid.UUID(value['bluetooth_id']))
+        if value.get('wifi_host'):
+            from wifi_transport import host_from_device
+            value['wifi_host']=host_from_device(value['wifi_host'])
         return value
     except (OSError,ValueError,TypeError,AttributeError):return {'mode':'usb'}
 
+def usb_devices():
+    from serial.tools import list_ports
+    return [{'port':p.device,'serial':p.serial_number or '',
+             'name':p.description or p.manufacturer or 'USB board'}
+            for p in list_ports.comports() if p.vid in (0x2886,0x303a) and p.device.startswith('/dev/cu.usb')]
+
+def serial_key(value):return ''.join(c.lower() for c in str(value) if c.isalnum())
+
+_usb_cache=(0,[])
+def selected_usb(settings,fallback):
+    global _usb_cache
+    wanted=settings.get('usb_serial')
+    if not wanted:return settings.get('usb_device') or fallback
+    now=time.monotonic()
+    if not _usb_cache[0] or now-_usb_cache[0]>1:_usb_cache=(now,usb_devices())
+    for device in _usb_cache[1]:
+        if serial_key(device['serial'])==serial_key(wanted):return device['port']
+    # USB paths may be reused by a different board. Remain disconnected when
+    # the chosen serial is absent rather than opening that reused path.
+    return '/dev/cu.xiao-missing-'+serial_key(wanted)
+
 def endpoint(root,usb_device):
     settings=connection(root);mode=settings['mode'];identifier=settings.get('bluetooth_id')
-    if identifier and (mode=='bluetooth' or (mode=='auto' and not (bool(usb_device) and Path(usb_device).exists()))):return 'ble://'+identifier
+    if mode=='wifi' and settings.get('wifi_host'):
+        from wifi_transport import host_from_device
+        return 'wifi://'+host_from_device(settings['wifi_host'])
+    usb_device=selected_usb(settings,usb_device)
+    if mode=='auto' and (not usb_device or not Path(usb_device).exists()):
+        if settings.get('wifi_host'):
+            from wifi_transport import host_from_device
+            return 'wifi://'+host_from_device(settings['wifi_host'])
+        binding=settings.get('bluetooth_usb_serial')
+        if identifier and (not settings.get('usb_serial') or (binding and serial_key(binding)==serial_key(settings['usb_serial']))):return 'ble://'+identifier
+    if identifier and mode=='bluetooth':return 'ble://'+identifier
     return usb_device
 
 def is_connected(device):
+    if not device:return False
+    if str(device).startswith('wifi://'):
+        from wifi_transport import is_connected as wifi_connected
+        return wifi_connected(device)
     if str(device).startswith('ble://'):
         session=_sessions.get(str(uuid.UUID(device[6:])))
         return session is not None and session.ready()
-    return bool(device) and Path(device).exists()
+    return Path(device).exists()
 
 async def scan():
     from bleak import BleakScanner
@@ -152,5 +194,6 @@ async def scan():
     return [{'id':d.address,'name':(a.local_name or d.name or 'XIAO Round Display')[:64]} for d,a in found.values() if SERVICE in [s.lower() for s in a.service_uuids]][:32]
 
 if __name__=='__main__':
-    try:print(json.dumps({'devices':asyncio.run(scan())}))
+    import sys
+    try:print(json.dumps({'devices':usb_devices() if '--usb' in sys.argv else asyncio.run(scan())}))
     except Exception as error:print(json.dumps({'error':type(error).__name__+': '+str(error)}))

@@ -38,8 +38,8 @@ UsbPowerState usbPower;HalfPastFaceRotation halfPastRotation;SceneRotation scene
 WatchCollection watches;DisplayLighting lighting;Backlight backlight;
 bool firstFrame=false,displaySleeping=false,scheduledWakeRepaint=false,waitingForWake=false;
 uint32_t clockSeconds=0,lastRecovery=0,recoveryStarted=0,brightnessReportAt=0;
-const char* names[]={"ROUND CLOCK","ANALEMMA","MOON","SOLAR SYSTEM","SUN","STAR SYSTEMS","GAME OF LIFE","CODEX USAGE","BAMBU PRINTER"};
-constexpr int firstScene=2,sceneCount=9;
+const char* names[]={"ROUND CLOCK","ANALEMMA","MOON","SOLAR SYSTEM","SUN","STAR SYSTEMS","GAME OF LIFE","CODEX USAGE","BAMBU P2S","WEATHER"};
+constexpr int firstScene=2,sceneCount=10;
 uint32_t switched=0,brightnessHintUntil=0,fadeTick=0;int previewMonth=0,previewDay=0;bool infoTarget=false;uint8_t infoOpacity=0;
 int mode=2,mediaOwner=2,recoveryRow=240,appliedBrightness=-1,appliedPWM=-1,selectionCount=0;
 void printLighting(){}void watchSelectionChanged(){selectionCount++;mediaOwner=-1;firstFrame=true;}
@@ -105,9 +105,9 @@ int main(){
  timer.reset(0xfffffff0u);assert(!timer.observe(uint32_t(0xfffffff0u+899999u),true));
  assert(timer.observe(uint32_t(0xfffffff0u+900000u),true));
  timer.observe(1000,false);assert(!timer.observe(90000000,true));assert(timer.remaining(90000000)==900000);
- // Exact production scene selection/scheduler: all nine scenes, wrap and no rapid catch-up.
+ // Exact production scene selection/scheduler: all ten scenes, wrap and no rapid catch-up.
  reset(12*3600);serviceDisplaySchedule();
- for(int next : {3,4,5,6,7,8,9,10,2}){
+ for(int next : {3,4,5,6,7,8,9,10,11,2}){
   nowMs+=899999;serviceDisplaySchedule();int prior=mode;
   assert(sceneRotation.remaining(nowMs)==1);
   nowMs++;serviceDisplaySchedule();assert(mode==next&&mode!=prior);if(mode==8)assert(life.running());else assert(!life.running());
@@ -163,7 +163,7 @@ int main(){
  serviceDisplaySchedule();assert(mode==4);nowMs+=59999;serviceDisplaySchedule();assert(mode==4);
  nowMs++;serviceDisplaySchedule();assert(mode==9);nowMs+=60000;serviceDisplaySchedule();assert(mode==10);
  puts("PASS actual menu handler: 60% boot/cached-profile isolation, explicit boot-bound brightness, filtered carousel, hold, manual selection, idempotence and LCD off/on.");
- puts("PASS 15-minute scene dwell, all-nine wrap, manual reset, sleep/calibration inhibition, no catch-up, RTC independence and millis rollover.");
+ puts("PASS 15-minute scene dwell, all-ten wrap, manual reset, sleep/calibration inhibition, no catch-up, RTC independence and millis rollover.");
  puts("PASS actual display sleep/wake/lighting functions, USB-only boundaries, VBUS outages/hotplug, half-past rotation/wrap and recovery isolation.");
 }
 '''

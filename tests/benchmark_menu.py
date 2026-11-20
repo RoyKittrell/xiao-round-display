@@ -57,5 +57,5 @@ harness=r'''
 with tempfile.TemporaryDirectory(prefix='xiao-menu-benchmark-',dir='/tmp') as tmp:
     src=Path(tmp)/'Benchmark.swift';src.write_text(source+harness)
     exe=Path(tmp)/'benchmark'
-    subprocess.run(['swiftc','-swift-version','5','-module-cache-path','/tmp/xiao-swift-cache','-O',str(src),str(root/'companion/menu_bar/Profiles.swift'),str(root/'companion/menu_bar/BluetoothSearch.swift'),'-o',str(exe),'-framework','AppKit'],check=True)
+    subprocess.run(['swiftc','-swift-version','5','-module-cache-path','/tmp/xiao-swift-cache','-O',str(src),str(root/'companion/menu_bar/Profiles.swift'),str(root/'companion/menu_bar/BluetoothSearch.swift'),str(root/'companion/menu_bar/WeatherLocation.swift'),str(root/'companion/menu_bar/WifiSetup.swift'),'-o',str(exe),'-framework','AppKit','-framework','CoreLocation','-framework','CoreWLAN'],check=True)
     subprocess.run([str(exe),str(root/'companion/scenes.json')],check=True)

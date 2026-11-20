@@ -1,10 +1,13 @@
 import Foundation
 
 struct Preferences: Codable {
-    var schemaVersion=1, revision:UInt32=1, enabledMask=511
+    var schemaVersion=1, revision:UInt32=1, enabledMask=1023
     var carousel=true, intervalSeconds=900, dayBrightness=60, nightBrightness=60
     var appearance=0, power=0, selectedScene = -1
     var selectionToken:UInt32=0, brightnessToken:UInt32=0
+    // Optional storage keeps older preferences decodable; absent means all.
+    var clockMask:Int?=nil
+    var includedClocks:Int {get{clockMask ?? 1023}set{clockMask=newValue}}
 }
 
 func nextToken(_ value:UInt32)->UInt32 { value == UInt32.max ? 1:value+1 }
@@ -15,29 +18,33 @@ struct ProfileSettings: Codable, Equatable {
     var enabledMask:Int, carousel:Bool, intervalSeconds:Int
     var dayBrightness:Int, nightBrightness:Int, appearance:Int, power:Int
     var selectedScene:Int
+    var clockMask:Int?=nil
+    var includedClocks:Int {clockMask ?? 1023}
 
     init(_ prefs:Preferences, currentScene:Int, day:Int?=nil, night:Int?=nil) {
         enabledMask=prefs.enabledMask;carousel=prefs.carousel;intervalSeconds=prefs.intervalSeconds
         dayBrightness=day ?? prefs.dayBrightness;nightBrightness=night ?? prefs.nightBrightness
         appearance=prefs.appearance;power=prefs.power
-        selectedScene=(2...10).contains(currentScene) ? currentScene:2
+        clockMask=prefs.includedClocks
+        selectedScene=(2...11).contains(currentScene) ? currentScene:2
         if carousel && enabledMask != 0 && enabledMask & (1 << (selectedScene-2)) == 0 {
-            selectedScene=(2...10).first{enabledMask & (1 << ($0-2)) != 0} ?? 2
+            selectedScene=(2...11).first{enabledMask & (1 << ($0-2)) != 0} ?? 2
         }
     }
     func validate() throws {
-        guard (0...511).contains(enabledMask), (60...3600).contains(intervalSeconds),
+        guard (0...1023).contains(enabledMask), (0...1023).contains(includedClocks), (60...3600).contains(intervalSeconds),
               (0...100).contains(dayBrightness), (0...100).contains(nightBrightness),
               (0...2).contains(appearance), (0...2).contains(power),
-              (2...10).contains(selectedScene) else {throw ProfileError.invalidSettings}
+              (2...11).contains(selectedScene) else {throw ProfileError.invalidSettings}
     }
     func applying(to current:Preferences, applyBrightness:Bool)->Preferences {
         var result=current
         result.enabledMask=enabledMask;result.carousel=carousel;result.intervalSeconds=intervalSeconds
         result.appearance=appearance;result.power=power
+        result.clockMask=includedClocks
         result.selectedScene=selectedScene
         if carousel && enabledMask != 0 && enabledMask & (1 << (selectedScene-2)) == 0 {
-            result.selectedScene=(2...10).first{enabledMask & (1 << ($0-2)) != 0} ?? 2
+            result.selectedScene=(2...11).first{enabledMask & (1 << ($0-2)) != 0} ?? 2
         }
         result.selectionToken=nextToken(current.selectionToken)
         // Choosing a profile is an explicit action. Offline profile selection
@@ -49,7 +56,7 @@ struct ProfileSettings: Codable, Equatable {
         return result
     }
     func matches(_ current:ProfileSettings)->Bool {
-        enabledMask==current.enabledMask && carousel==current.carousel && intervalSeconds==current.intervalSeconds &&
+        enabledMask==current.enabledMask && includedClocks==current.includedClocks && carousel==current.carousel && intervalSeconds==current.intervalSeconds &&
         dayBrightness==current.dayBrightness && nightBrightness==current.nightBrightness &&
         appearance==current.appearance && power==current.power && (carousel || selectedScene==current.selectedScene)
     }

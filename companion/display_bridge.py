@@ -13,6 +13,7 @@ import fcntl,json,os,sys,time
 from pathlib import Path
 import codex_usage,bambu_status,sun_bridge
 from helper_runtime import Registry
+from hardware_profile import HardwareProfile
 from display_control import Control
 from process_owner import check_owner,stop_orphan
 from display_transport import open_port,endpoint,is_connected,close_bluetooth
@@ -50,7 +51,7 @@ def send_printer(value,device=None,port=None):
             opened.reset_input_buffer();sync_clock(opened);send_printer(value,port=opened)
 
 class Dispatcher:
-    def __init__(self,registry,device,select=False,control=None):self.registry=registry;self.device=device;self.select=select;self.control=control
+    def __init__(self,registry,device,select=False,control=None):self.registry=registry;self.device=device;self.select=select;self.control=control;self.hardware=HardwareProfile(ROOT)
     def small(self,port=None,force=False):
         due=[]
         for state in self.registry.states:
@@ -60,14 +61,24 @@ class Dispatcher:
         if not due and not control_due:return
         if port is None:
             with usb_lock(),open_port(self.device,115200,timeout=.2,write_timeout=5) as opened:
-                opened.reset_input_buffer();sync_clock(opened)
-                if control_due:self.control.send(opened)
+                opened.reset_input_buffer();profile=self.hardware.ensure(opened,self.device)
+                if self.control:self.control.protocol_version=profile.get("control_version",2)
+                sync_clock(opened)
+                if control_due:
+                    result=self.control.send(opened)
+                    if result:self.hardware.observe_boot(result.get("boot_id"))
                 self._packets(opened,due)
         else:
-            if control_due:self.control.send(port)
+            if control_due:
+                result=self.control.send(port)
+                if result:self.hardware.observe_boot(result.get("boot_id"))
             self._packets(port,due)
     def _packets(self,port,due):
         for state,data,version in due:
+            if state.source.id=='weather' and self.hardware.value.get('scene_count',10)<10:
+                with state.lock:state.usb_error='Weather needs a firmware update'
+                state.next_send=time.monotonic()+60
+                continue
             try:
                 packet=state.source.encode(data);port.write(packet);port.flush()
                 ack='ACK '+packet[1:2].decode();sun_bridge.wait_for(port,ack,5)
@@ -83,7 +94,7 @@ class Dispatcher:
             if not state.source.transfer or data is None or version==state.last_sent_version:continue
             try:
                 def auxiliary(port):
-                    check_owner();self.small(port);health(self.registry,self.device)
+                    check_owner();self.small(port);health(self.registry,self.device,self.hardware.value)
                 with usb_lock():state.source.transfer(*data,self.device,on_progress=auxiliary)
                 state.last_sent_version=version
                 with state.lock:state.delivered_at=time.time();state.usb_error=None
@@ -93,9 +104,9 @@ class Dispatcher:
                 state.last_sent_version=version
                 print(state.source.label+' transfer unavailable: '+type(error).__name__,flush=True)
 
-def health(registry,device):
+def health(registry,device,hardware=None):
     path=ROOT/'helper-status.json';temporary=path.with_suffix('.tmp')
-    temporary.write_text(json.dumps({'updated_at':int(time.time()),'usb_connected':bool(device) and not str(device).startswith('ble://') and Path(device).exists(),'display_connected':bool(device) and is_connected(device),'transport':'bluetooth' if str(device).startswith('ble://') else 'usb','sources':registry.status()},indent=2)+'\n');temporary.replace(path)
+    temporary.write_text(json.dumps({'updated_at':int(time.time()),'usb_connected':bool(device) and not str(device).startswith(('ble://','wifi://')) and Path(device).exists(),'display_connected':bool(device) and is_connected(device),'transport':'wifi' if str(device).startswith('wifi://') else 'bluetooth' if str(device).startswith('ble://') else 'usb','sources':registry.status(),'hardware':hardware or {}},indent=2)+'\n');temporary.replace(path)
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -126,19 +137,19 @@ def main():
                 check_owner()
                 selected=endpoint(ROOT,args.device)
                 if dispatcher.device!=selected:
-                    close_bluetooth();dispatcher.device=selected;connected=False;control.boot_id=0
-                present=str(selected).startswith('ble://') or bool(selected) and Path(selected).exists()
+                    close_bluetooth();dispatcher.device=selected;connected=False;control.boot_id=0;dispatcher.hardware.reset(selected)
+                present=str(selected).startswith(('ble://','wifi://')) or bool(selected) and Path(selected).exists()
                 if not present:
-                    registry.connected.clear();connected=False;health(registry,dispatcher.device);time.sleep(1);continue
+                    registry.connected.clear();connected=False;health(registry,dispatcher.device,dispatcher.hardware.value);time.sleep(1);continue
                 registry.connected.set()
-                if not connected:registry.reconnect();control.reconnect();connected=True
+                if not connected:registry.reconnect();control.reconnect();dispatcher.hardware.reset(selected);connected=True
                 try:
                     dispatcher.small();dispatcher.images()
                 except (OSError,TimeoutError) as error:
                     print('Display delivery unavailable: '+type(error).__name__+'; replaying on reconnect',flush=True)
                     connected=False;time.sleep(1)
                 if time.monotonic()>=health_due:
-                    health(registry,dispatcher.device);health_due=time.monotonic()+2
+                    health(registry,dispatcher.device,dispatcher.hardware.value);health_due=time.monotonic()+2
                 time.sleep(.25)
         finally:registry.close();close_bluetooth()
 if __name__=='__main__':main()

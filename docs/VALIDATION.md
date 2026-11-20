@@ -1,53 +1,52 @@
-# Validation and remaining checks
+# Validation scope
 
-Checked 15 November 2026. The public source is an **unconfigured template** for
-XIAO nRF54LM20A Sense plus Seeed Round Display; it is not a configured backup.
-Helper **2.2.2** includes the menu responsiveness fixes and experimental
-Bluetooth controls. Firmware is **public-template-r26**.
+The public r34 source is a blank template. It has not been installed with a new
+owner’s printer/account/network settings. No configured app bundle or captured
+firmware image is published.
 
-## Build and offline verification
+## This update
 
-- Firmware compiled with nrf54-arduino-core **1.0.21** and the documented board
-  alias: **630,112 program bytes**, **79,692 static RAM bytes**. Dynamic canvases
-  are additional RAM allocations.900 tile fingerprints replace the old
-  previous-frame canvas, saving110,700 bytes while retaining RGB565 images.
-- The Swift/AppKit helper built and was locally signed through `manage.py stage`.
-  Staging does not install a service or start a data worker.
-- The declared dependencies were installed in a dedicated environment. A real
-  temporary runtime relocation check imported dependencies from the relocated
-  environment and verified blank configuration: no device and no enabled feeds.
-- Offline checks cover scene controls, CRC parsing, brightness boot isolation,
-  clock/bus recovery, power scheduling, all/empty carousel masks, profiles,
-  astronomy and bounded renderers. No account, printer or Bluetooth radio is
-  contacted by these checks.
-- Bluetooth harnesses cover fragmented/bounded receive data, authenticated RX,
-  USB/Bluetooth packet isolation, write backpressure, overflow reconnection,
-  cancellation cleanup and automatic fallback with no configured USB port.
-- Native search tests check decoded results, failed child processes and bounded
-  timeout/cleanup using synthetic scripts. The native menu harness checks cached
-  view reuse, All/None/mixed states and menu-activity cleanup. These are not
-  measurements of physical pointer/menu animation latency.
-- Sun-transfer mocks reconstruct57,600 pixels with CRCs and complete coverage.
-  They verify1,920 wireless control/health opportunities and120 USB opportunities.
-- Publishable files are audited for personal paths/addresses, credentials,
-  device selection, profiles, caches and generated binaries. Pairings and live
-  readings stay local; optional sources remain disabled by default.
+- Offline privacy/default-config tests: no selected device, observer location,
+  account, printer or enabled source; weather has no default city.
+- Identification: S3/C6/Nordic and legacy firmware, unknown firmware, reconnect
+  and boot changes, and same-device automatic connection scoping.
+- Real localhost TLS tests: correct/wrong certificate pins, controller-token
+  authentication, fragmented replies and receive limits. No internet used.
+- USB setup parser under ASan/UBSan and finite CDC-ring overflow regression.
+- Production clock recovery, schedules, brightness/session controls, carousel,
+  scene/clock filters, Sun CRC coverage and S3 allocation/cache tests.
+- Native helper builds/signs locally. Cached menu-open callback median was
+  approximately0.003ms across500 off-screen opens; this excludes macOS popup
+  animation and physical pointer movement. Views and checklists remain cached.
+- Shared public sketch compiles with Arduino ESP32 core3.3.12 for S3/C6 and the
+  documented nRF54 platform. Compilation does not establish C6 Wi-Fi runtime
+  memory or a new owner’s panel/network behavior.
 
-## Observations on the originating hardware
+## Originating hardware observations
 
-The owner confirmed that the menu responsiveness fix improved opening and
-navigation. Initial Bluetooth integration passed passkey pairing, acknowledged
-wireless scene selection and brightness changes, and one bonded helper restart.
-The owner confirmed scene changes and clock animation. Startup brightness60%,
-physical dimming with KE switch2 ON and USB controls were also checked.
+The S3 running the corresponding configured r33 firmware was positively
+identified, joined its owner’s Wi-Fi and reconnected after a firmware update.
+All ten scenes, menu controls, Weather12/24 mode, live Codex/printer/weather
+packet delivery, and a complete Sun transfer passed over certificate-pinned
+TLS. Full Sun CRC stayed identical across scene changes. Complete-row transfers
+reduced a full integration check from133.80s to25.94s on that setup. These are
+whole-test durations, not raw Wi-Fi throughput figures. The cached Sun image
+was used for integrity checks when the upstream NASA fetch was unavailable.
 
-These observations do not establish compatibility for every Mac, panel or
-printer. The final installed package's Bluetooth permission/reconnection check
-remains pending after the latest rebuild. Full wireless Sun-image completion,
-long-duration wireless operation and cold-boot reconnection are not yet verified.
-Use USB as the initial/recovery path and treat Bluetooth as experimental.
+Big Ben measured30.3FPS with Wi-Fi connected. The owner confirmed centre taps
+and top double-taps. Helper2.7.0 identified the S3 in its actual menu, and the
+owner confirmed the name/options. The neutral public r34 firmware itself was
+compiled rather than flashed during this publication update.
 
-Intermittent shared touch/RTC I²C stalls occurred on the originating hardware.
-Automatic recovery is included, but power/connection checks and a full power
-cycle can still be needed. There is no wireless firmware updater. Additional
-XIAO controllers require their own pin, RAM, driver and upload validation.
+C6 USB/Bluetooth scene controls were checked in earlier originating sessions;
+C6 Wi-Fi/TLS heap and performance remain unqualified. S3 Bluetooth stack startup
+was checked; new S3 pairing was not. Final public-package macOS permissions and
+Bluetooth reconnect still need owner testing. Shared touch/RTC idle bus errors
+remain a known separate investigation, despite working physical touch controls;
+independent RTC reliability is not claimed. The helper synchronizes running time.
+
+Run `python tools/check.py` for offline tests, `python tests/check_wifi.py` for
+loopback TLS tests, and `python companion/service/manage.py stage` for the native
+app build. None authorize querying an owner’s account, pairing a printer or
+flashing a board. New owners should perform the explicit checks in SETUP.md,
+HARDWARE.md and WIFI.md before relying on their own installation.

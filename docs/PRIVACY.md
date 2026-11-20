@@ -49,3 +49,13 @@ encrypted link for control/data writes and can retain bonds on the board.
 Display packets contain the same scene/status data as USB, never printer LAN
 codes or Codex authentication tokens. Bluetooth does not fetch internet data
 independently and provides no firmware-update service.
+
+Wi-Fi setup generates a certificate/key for each display and an independent
+random controller token. The helper pins that exact certificate, validates its
+hostname and sends the controller token inside TLS. No network credential is
+compiled into the project. Wi-Fi passwords use a native secure input field and
+stdin, never process arguments, chat, source, logs or saved Mac settings. Ordinary
+device NVS holds the Wi-Fi credentials/private key; this does not imply physical
+flash extraction protection. Pairing material under local private/wifi and
+configured NVS/flash dumps must never be published. Hardware, Wi-Fi-setup and
+weather-location state are ignored by Git and covered by the privacy audit.

@@ -21,6 +21,9 @@ class Source:
     close: Callable | None = None
     send_interval: float = 5
     load: Callable | None = None
+    trigger: Callable | None = None
+    invalidated: Callable | None = None
+    send_on_publish: bool = False
 
 class SourceState:
     def __init__(self,source):
@@ -40,6 +43,7 @@ class SourceState:
         if self.source.encode:self.source.encode(data)
         with self.lock:
             self.latest=data;self.version+=1;self.fetched_at=time.time();self.error=None
+            if self.source.send_on_publish:self.next_send=0
         if self.source.cache:
             path=self.source.cache;path.parent.mkdir(parents=True,exist_ok=True)
             temporary=path.with_name(path.name+'.tmp')
@@ -48,13 +52,23 @@ class SourceState:
     def status(self):
         with self.lock:
             observed=self.latest.get('observed_at') if isinstance(self.latest,dict) else None
-            return {'label':self.source.label,'available':self.latest is not None,'last_fetched_at':self.fetched_at,
+            return {'label':self.source.label,'available':self.latest is not None,'pending':bool(self.latest.get('pending')) if isinstance(self.latest,dict) else False,'last_fetched_at':self.fetched_at,
                     'source_observed_at':observed,'last_delivered_at':self.delivered_at,'fetch_error':self.error,'usb_error':self.usb_error}
     def start(self,stop,connected):
         def work():
             due=0
+            token=self.source.trigger() if self.source.trigger else None
             while not stop.is_set():
                 if not connected.wait(.25):continue
+                if self.source.trigger:
+                    try:
+                        current=self.source.trigger()
+                        if current!=token:
+                            token=current;due=0
+                            if self.source.invalidated:self.publish(self.source.invalidated())
+                            self.next_send=0
+                    except Exception as error:
+                        with self.lock:self.error=type(error).__name__+': '+str(error)
                 if time.monotonic()<due:
                     stop.wait(min(.25,due-time.monotonic()));continue
                 try:self.publish(self.source.fetch())

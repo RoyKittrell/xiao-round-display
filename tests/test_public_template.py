@@ -17,6 +17,12 @@ class PublicTemplate(unittest.TestCase):
             with patch('codex_usage.snapshot') as quota,patch('bambu_status.Monitor') as printer,patch('sun_bridge.download') as sun:
                 self.assertEqual(build(Path(tmp)),[])
                 quota.assert_not_called();printer.assert_not_called();sun.assert_not_called()
+    def test_weather_has_no_default_city(self):
+        import weather_status
+        with tempfile.TemporaryDirectory() as tmp:
+            with self.assertRaises(ValueError):weather_status.location(Path(tmp))
+            self.assertIn('weather',config.SOURCES)
+
     def test_explicit_enable_roundtrip_and_private_permissions(self):
         with tempfile.TemporaryDirectory() as tmp:
             v={**config.DEFAULTS,'enabled_sources':['sun'],'device':'/dev/cu.usbmodemEXAMPLE'}

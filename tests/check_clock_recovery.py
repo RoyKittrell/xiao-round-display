@@ -21,8 +21,8 @@ harness = r'''
 #include <cassert>
 #include <cstdio>
 #include <cstring>
-#include "ClockDate.h"
 #include "UserSettings.h"
+#include "ClockDate.h"
 #include "SceneControl.h"
 #include "ClockSlew.h"
 #include "WatchAppearance.h"

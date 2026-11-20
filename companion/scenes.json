@@ -1,5 +1,6 @@
 [
  {"id":2,"name":"Clocks"},{"id":3,"name":"Analemma"},{"id":4,"name":"Moon"},
  {"id":5,"name":"Solar System"},{"id":6,"name":"Sun"},{"id":7,"name":"Star Systems"},
- {"id":8,"name":"Game of Life"},{"id":9,"name":"Codex Usage"},{"id":10,"name":"Bambu Printer"}
+ {"id":8,"name":"Game of Life"},{"id":9,"name":"Codex Usage"},{"id":10,"name":"Bambu Printer"},
+ {"id":11,"name":"Weather"}
 ]

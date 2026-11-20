@@ -13,4 +13,5 @@ jobs:
       - run: python -m venv .venv
       - run: .venv/bin/python -m pip install -r requirements-dev.txt
       - run: .venv/bin/python tools/check.py
+      - run: .venv/bin/python tests/check_wifi.py
       - run: .venv/bin/python companion/service/manage.py stage
