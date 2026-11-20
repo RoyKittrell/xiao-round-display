@@ -5,11 +5,13 @@ README.md, docs/SETUP.md, docs/PRIVACY.md and AGENTS.md before making changes.
 
 ## Ask the owner only for missing non-secret choices
 
-1. Confirm exact microcontroller/display model and operating system.
+1. Confirm exact microcontroller/display model and operating system; read docs/HARDWARE.md.
+   The helper can identify a running firmware, but shared USB IDs alone cannot
+   distinguish S3/C6 or identify an unflashed board. Never silently flash.
 2. Discover serial devices locally; let the owner identify the intended one.
    Discover/verify the probe UID before any authorized upload.
 3. Ask which sources they want: none, Sun/NOAA, their Codex usage, their Bambu
-   status. Every source is disabled by default. Do not query accounts just to
+   status, or weather. Every source is disabled by default. Do not query accounts just to
    see whether they exist.
 4. Ask for civil UTC offset and whether they want an observer location. They may
    leave UTC/no observer. Explain that fixed offsets do not implement DST.
@@ -66,3 +68,16 @@ Before sharing changes: run offline tests and the privacy audit, inspect
 `git diff --cached`, and verify local configuration/cache files remain ignored.
 Only report hardware/account verification that was actually performed for this
 owner. Do not claim the public template is already paired or signed in.
+
+## ESP32 Wi-Fi and hardware-aware menus
+
+Follow docs/HARDWARE.md for the correct build (S3 requires OPI PSRAM) and
+WIFI.md for one-time USB provisioning. The helper identifies the selected
+firmware in its worker and hides Wi-Fi on Nordic, or labels an older ESP32
+build as needing an update. It preserves user scene/profile/appearance choices.
+Unknown firmware is shown honestly. Choosing another USB serial clears ambiguous
+wireless associations; automatic mode prefers that selected USB, then its saved
+Wi-Fi, then a Bluetooth pair bound to the same selected device. Do not import
+another owner’s pairing files or infer that a similarly named nearby display is
+safe to control. Validate S3, C6 and Nordic compilation separately. C6 Wi-Fi/TLS
+runtime memory is not yet hardware-qualified; do not claim otherwise.

@@ -13,7 +13,8 @@ in application support, not tracked source. Local firmware overrides are ignored
 
 Preserve all scenes/assets when a menu preference changes. Maintain native-menu
 caching and the persistent checklist; avoid rebuilding menus or doing network
-work on the UI thread. One Python worker owns display transport (USB or explicitly paired Bluetooth). New integrations use the
+work on the UI thread. One Python worker owns the selected display transport (USB, explicitly paired
+Bluetooth, or USB-provisioned certificate-pinned Wi-Fi). New integrations use the
 allowlisted source registry and bounded CRC packets. Do not issue printer-control
 commands from the status monitor. Startup brightness is60%, with first-frame
 blanking; preserve true0% and screen-off support, and do not replay cached levels.
@@ -27,3 +28,11 @@ before publishing. Do not commit generated local configuration or app bundles.
 Bluetooth remains experimental. Preserve USB fallback, encrypted/authenticated
 controls and bounded discovery. Do not claim final-package reconnection or
 full wireless image delivery was verified without new physical evidence.
+
+Hardware identification runs in the worker, never in a menu callback. Unknown
+firmware stays unidentified; do not infer ESP32-S3/C6 from their shared USB IDs.
+Preserve endpoint/serial scoping so auto mode cannot select another display’s
+old wireless pairing. Wi-Fi credentials are entered only through the native
+secure field over USB; keep generated device keys, controller tokens, pins and
+location/network diagnostic files out of Git. No firmware OTA service exists.
+See docs/HARDWARE.md and docs/WIFI.md for build and verification limits.

@@ -41,3 +41,16 @@ bluetooth-status.json
 python-runtime/
 python-runtime.installing/
 python-runtime.previous/
+
+# Local hardware and network/location state
+hardware-status.json
+weather-location.json
+wifi-setup-status.json
+assets/weather/
+display-pairings.json
+
+# Interrupted local atomic saves
+*-status.tmp
+weather-location.tmp
+display-*.tmp
+settings.tmp

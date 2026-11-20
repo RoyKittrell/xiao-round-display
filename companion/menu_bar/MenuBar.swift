@@ -1,4 +1,5 @@
 import AppKit
+import CoreWLAN
 import Foundation
 import Darwin
 import Dispatch
@@ -42,12 +43,13 @@ final class CarouselChecklist:NSView {
     var buttons:[NSButton]=[]
     let allButton=NSButton(),note=NSTextField(labelWithString:"")
     let allMask:Int
+    let bitBase:Int
     private var lastMask:Int?
     let onToggle:(Int)->Void, onDone:()->Void
     override var isFlipped:Bool {true}
-    init(scenes:[Scene],mask:Int,onToggle:@escaping(Int)->Void,onDone:@escaping()->Void){
+    init(scenes:[Scene],mask:Int,bitBase:Int=2,onToggle:@escaping(Int)->Void,onDone:@escaping()->Void){
         self.onToggle=onToggle;self.onDone=onDone
-        allMask=scenes.reduce(0){$0 | (1 << ($1.id-2))}
+        self.bitBase=bitBase;allMask=scenes.reduce(0){$0 | (1 << ($1.id-bitBase))}
         super.init(frame:NSRect(x:0,y:0,width:270,height:CGFloat(scenes.count*26+92)))
         allButton.setButtonType(.switch);allButton.title="All";allButton.allowsMixedState=true
         allButton.target=self;allButton.action=#selector(toggle(_:));allButton.tag = -1
@@ -72,7 +74,7 @@ final class CarouselChecklist:NSView {
         if allButton.state != allState{allButton.state=allState}
         note.show(mask==0 ? "None selected · paused":"Changes save immediately")
         for button in buttons {
-            let selected=mask & (1 << (button.tag-2)) != 0
+            let selected=mask & (1 << (button.tag-bitBase)) != 0
             let state:NSControl.StateValue=selected ? .on:.off
             if button.state != state{button.state=state}
         }
@@ -89,16 +91,24 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     var pendingBrightnessRevision:UInt32?,pendingBrightnessValue:Int?,pendingBrightnessProfile:String?
     var profileStore:ProfileStore?
     var carouselChecklist:CarouselChecklist?
+    var clockChecklist:CarouselChecklist?,clockFaces:[Scene]=[]
+    var weatherPlace:WeatherPlace?,weatherLocationRequest:WeatherLocationRequest?
+    var weatherLocationBusy=false
+    var weatherLocationPanel:NSPanel?
+    let weatherLocationURL=dataRoot.appendingPathComponent("weather-location.json")
     let stateQueue=DispatchQueue(label:"org.xiaodisplay.menu-state",qos:.utility)
     var stateReadPending=false,menuIsOpen=false,lastMenuSignature="",profileMenuGeneration=0
     var sourceEntries:[String:NSMenuItem]=[:]
     var menuActivity:NSObjectProtocol?
-    var connectionSettings:[String:String]=[:],bluetoothScanRunning=false
+    var connectionSettings:[String:String]=[:],bluetoothScanRunning=false,wifiSetupRunning=false
     let connectionURL=dataRoot.appendingPathComponent("display-connection.json")
     var connected:Bool {
         let timestamp=health["updated_at"] as? Double ?? 0
         return (health["display_connected"] as? Bool ?? health["usb_connected"] as? Bool ?? false) && Date().timeIntervalSince1970-timestamp<20
     }
+    var hardware:[String:Any]{health["hardware"] as? [String:Any] ?? [:]}
+    var wifiHardware:Bool{hardware["wifi_hardware"] as? Bool ?? false}
+    var wifiFirmware:Bool{hardware["wifi_firmware"] as? Bool ?? false}
     var currentScene:Int { device["scene"] as? Int ?? prefs.selectedScene }
     var actualNight:Bool {
         if prefs.appearance==1{return false};if prefs.appearance==2{return true}
@@ -113,8 +123,11 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     func applicationDidFinishLaunching(_ notification:Notification){
         let catalog=Bundle.main.resourceURL!.appendingPathComponent("companion/scenes.json")
         scenes=(try? decoder.decode([Scene].self,from:Data(contentsOf:catalog))) ?? []
+        let faces=Bundle.main.resourceURL!.appendingPathComponent("companion/clock-faces.json")
+        clockFaces=(try? decoder.decode([Scene].self,from:Data(contentsOf:faces))) ?? []
+        weatherPlace=WeatherPlace.load(weatherLocationURL)
         if CommandLine.arguments.contains("--menu-dump"){
-            let tree:[String:Any]=["name":helperName,"scenes":scenes.map{$0.name},"profiles":["Saved profiles","Save Current Settings as Profile…","Delete Profile"],"playback":["Carousel","Stay on selected scene"],"intervals":[1,5,10,15,30,60],"brightness":"0–100% slider; startup60%","power":["Automatic schedule","Always on","Screen off"]]
+            let tree:[String:Any]=["name":helperName,"scenes":scenes.map{$0.name},"scene_options":["Clocks":["Show Clocks","Select/deselect all"]+clockFaces.map{$0.name},"Weather":["Show Weather","Select Location…"]],"profiles":["Saved profiles","Save Current Settings as Profile…","Delete Profile"],"playback":["Carousel","Stay on selected scene"],"intervals":[1,5,10,15,30,60],"brightness":"0–100% slider; startup60%","power":["Automatic schedule","Always on","Screen off"]]
             if let d=try? JSONSerialization.data(withJSONObject:tree,options:.prettyPrinted){print(String(data:d,encoding:.utf8)!)}
             NSApp.terminate(nil);return
         }
@@ -203,7 +216,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
                 // profile or slider action performed while it was in flight.
                 if self.prefs.revision==revisionWhenRequested,let saved=saved{self.prefs=saved}
                 self.device=deviceState;self.health=workerState
-                self.carouselChecklist?.update(mask:self.prefs.enabledMask);self.updateTip()
+                self.carouselChecklist?.update(mask:self.prefs.enabledMask);self.clockChecklist?.update(mask:self.prefs.includedClocks);self.updateTip()
                 // Keep navigation stable: source-age labels are snapshots on opening.
                 if self.menuIsOpen{self.updateBrightnessFeedback()}
                 self.prepareMenuIfNeeded()
@@ -214,6 +227,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
         if let data=try? Data(contentsOf:prefsURL),let value=try? decoder.decode(Preferences.self,from:data){prefs=value}
         device=object(statusURL);health=object(healthURL)
         carouselChecklist?.update(mask:prefs.enabledMask)
+        clockChecklist?.update(mask:prefs.includedClocks)
     }
     @discardableResult func save()->Bool {
         prefs.revision = prefs.revision == UInt32.max ? 1:prefs.revision+1
@@ -228,7 +242,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
         [String(prefs.revision),String(currentScene),String(connected),String(actualNight),
          String(device["sleeping"] as? Int ?? -1),String(device["revision"] as? UInt32 ?? 0),
          String(device["day_brightness"] as? Int ?? -1),String(device["night_brightness"] as? Int ?? -1),
-         device["error"] as? String ?? "",String(profileMenuGeneration),connectionSettings["mode"] ?? "usb",connectionSettings["bluetooth_id"] ?? "",String(bluetoothScanRunning)].joined(separator:"|")
+         device["error"] as? String ?? "",String(profileMenuGeneration),connectionSettings["mode"] ?? "usb",connectionSettings["bluetooth_id"] ?? "",hardware["model"] as? String ?? "",String(wifiFirmware),String(hardware["control_version"] as? Int ?? 2),String(bluetoothScanRunning),String(wifiSetupRunning),connectionSettings["wifi_host"] ?? "",String(weatherLocationBusy),weatherPlace?.city ?? ""].joined(separator:"|")
     }
     func prepareMenuIfNeeded(){if !menuIsOpen && menuSignature != lastMenuSignature{rebuild()}}
     func menuWillOpen(_ menu:NSMenu){
@@ -254,14 +268,33 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     }
     func submenu(_ title:String)->NSMenu{let m=NSMenu();m.autoenablesItems=false;add(title).submenu=m;return m}
     func rebuild(){
-        menu.removeAllItems();add("XIAO Round Display",enabled:false)
+        menu.removeAllItems();add(hardware["model"] as? String ?? "Identifying XIAO…",enabled:false)
         let current=scenes.first{$0.id==currentScene}?.name ?? "Ready"
-        add(connected ? "Connected via \(health["transport"] as? String == "bluetooth" ? "Bluetooth":"USB") · \(current)":"Display disconnected · changes will queue",enabled:false)
+        add(connected ? "Connected via \(health["transport"] as? String == "wifi" ? "Wi-Fi":health["transport"] as? String == "bluetooth" ? "Bluetooth":"USB") · \(current)":"Display disconnected · changes will queue",enabled:false)
+        if hardware["firmware_update_recommended"] as? Bool == true{add("Older firmware · update for Weather & face filters",enabled:false)}
         if connected,(device["revision"] as? UInt32 ?? 0) != prefs.revision{add("Applying settings…",enabled:false)}
         if device["error"] is String{add("Waiting for display controls",enabled:false)}
         menu.addItem(.separator())
         let picker=submenu("Scenes")
-        for scene in scenes{add(scene.name,to:picker,action:#selector(selectScene(_:)),tag:scene.id,checked:currentScene==scene.id)}
+        for scene in scenes{
+            if scene.id==11 && (hardware["scene_count"] as? Int ?? 10)<10 {add("Weather · firmware update needed",to:picker,enabled:false);continue}
+            if scene.id==2 || scene.id==11 {
+                let entry=add(scene.name,to:picker,checked:currentScene==scene.id)
+                let options=NSMenu();options.autoenablesItems=false;entry.submenu=options
+                add("Show \(scene.name)",to:options,action:#selector(selectScene(_:)),tag:scene.id)
+                options.addItem(.separator())
+                if scene.id==2 {
+                    if hardware["clock_filters"] as? Bool == false{add("Update firmware for individual face selection",to:options,enabled:false);continue}
+                    let view=CarouselChecklist(scenes:clockFaces,mask:prefs.includedClocks,bitBase:0,
+                        onToggle:{[weak self] id in self?.toggleClockFace(id)},onDone:{[weak self] in self?.menu.cancelTracking()})
+                    view.allButton.title="Select / deselect all"
+                    let item=NSMenuItem();item.view=view;options.addItem(item);clockChecklist=view
+                }else{
+                    add(weatherPlace.map{"Saved: \($0.city)"} ?? "No location selected",to:options,enabled:false)
+                    add(weatherLocationBusy ? "Finding location…":"Select Location…",to:options,action:#selector(selectWeatherLocation(_:)),enabled: !weatherLocationBusy)
+                }
+            }else{add(scene.name,to:picker,action:#selector(selectScene(_:)),tag:scene.id,checked:currentScene==scene.id)}
+        }
         let included=submenu("Include in Carousel")
         let checklist=CarouselChecklist(scenes:scenes,mask:prefs.enabledMask,onToggle:{[weak self] id in self?.toggleCarouselScene(id)},onDone:{[weak self] in self?.menu.cancelTracking()})
         let checklistItem=NSMenuItem();checklistItem.view=checklist;included.addItem(checklistItem);carouselChecklist=checklist
@@ -296,26 +329,83 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
         let power=submenu("Power")
         for (i,name) in ["Automatic · sleep 01:00–07:00","Always on","Screen off"].enumerated(){add(name,to:power,action:#selector(changePower(_:)),tag:i,checked:prefs.power==i)}
         let connections=submenu("Connection")
-        let connectionMode=connectionSettings["mode"] ?? "usb",hasBluetooth=connectionSettings["bluetooth_id"] != nil
+        let connectionMode=connectionSettings["mode"] ?? "usb",hasBluetooth=connectionSettings["bluetooth_id"] != nil && (connectionSettings["usb_serial"] == nil || connectionSettings["bluetooth_usb_serial"] == connectionSettings["usb_serial"] || connectionMode=="bluetooth")
         add("USB",to:connections,action:#selector(changeConnection(_:)),tag:0,checked:connectionMode=="usb")
-        add("Bluetooth",to:connections,action:#selector(changeConnection(_:)),tag:1,checked:connectionMode=="bluetooth",enabled:hasBluetooth)
-        add("Automatic · prefer USB",to:connections,action:#selector(changeConnection(_:)),tag:2,checked:connectionMode=="auto",enabled:hasBluetooth)
+        if wifiFirmware {
+            add("Wi-Fi",to:connections,action:#selector(changeConnection(_:)),tag:3,checked:connectionMode=="wifi",enabled:connectionSettings["wifi_host"] != nil)
+            add(wifiSetupRunning ? "Setting up Wi-Fi…":"Set Up Wi-Fi via USB…",to:connections,action:#selector(setupWifi(_:)),enabled: !wifiSetupRunning && connected && (health["transport"] as? String)=="usb")
+        }else if wifiHardware{add("Wi-Fi needs a firmware update",to:connections,enabled:false)}
+        else if hardware["identified"] as? Bool == true{add("USB & Bluetooth · this board has no Wi-Fi",to:connections,enabled:false)}
+        else{add("Connect a display to identify its hardware",to:connections,enabled:false)}
+        add("Bluetooth",to:connections,action:#selector(changeConnection(_:)),tag:1,checked:connectionMode=="bluetooth",enabled:hasBluetooth && (hardware["bluetooth"] as? Bool ?? false))
+        add("Automatic · prefer USB",to:connections,action:#selector(changeConnection(_:)),tag:2,checked:connectionMode=="auto",enabled:connectionSettings["wifi_host"] != nil || hasBluetooth)
+        add("Choose USB Display…",to:connections,action:#selector(findUSBDisplay(_:)))
         connections.addItem(.separator())
         add(bluetoothScanRunning ? "Searching for display…":"Find Bluetooth Display…",to:connections,action:#selector(findBluetooth(_:)),enabled: !bluetoothScanRunning)
         let sources=submenu("Data Sources")
         sourceEntries.removeAll()
-        for key in ["codex","bambu","sun"]{
+        for key in ["codex","bambu","sun","weather"]{
             if let title=sourceTitle(key){sourceEntries[key]=add(title,to:sources,enabled:false)}
         }
+        sources.addItem(.separator())
+        add("Weather data · Open-Meteo (CC BY 4.0)…",to:sources,action:#selector(weatherCredits(_:)))
         menu.addItem(.separator());add("Quit Helper",action:#selector(quitHelper(_:)))
         lastMenuSignature=menuSignature
+    }
+    @objc func weatherCredits(_ sender:NSMenuItem){
+        NSWorkspace.shared.open(URL(string:"https://open-meteo.com/")!)
+    }
+    func toggleClockFace(_ id:Int){
+        load();guard id == -1 || clockFaces.contains(where:{$0.id==id}) else{return}
+        let all=clockFaces.reduce(0){$0 | (1 << $1.id)}
+        prefs.includedClocks=id == -1 ? (prefs.includedClocks==all ? 0:all):(prefs.includedClocks ^ (1 << id))
+        if save(){clockChecklist?.update(mask:prefs.includedClocks)}
+    }
+    @objc func selectWeatherLocation(_ sender:NSMenuItem){
+        guard !weatherLocationBusy else{return}
+        menu.cancelTracking();NSApp.activate(ignoringOtherApps:true)
+        weatherLocationBusy=true;prepareMenuIfNeeded()
+        let panel=NSPanel(contentRect:NSRect(x:0,y:0,width:380,height:130),styleMask:[.titled],backing:.buffered,defer:false)
+        panel.title="Weather location";panel.isReleasedWhenClosed=false
+        let label=NSTextField(labelWithString:"Finding your location for local weather…")
+        label.frame=NSRect(x:22,y:75,width:340,height:22);panel.contentView?.addSubview(label)
+        let spinner=NSProgressIndicator(frame:NSRect(x:24,y:30,width:20,height:20));spinner.style = .spinning
+        spinner.startAnimation(nil);panel.contentView?.addSubview(spinner)
+        let cancel=NSButton(title:"Cancel",target:self,action:#selector(cancelWeatherLocation(_:)));cancel.bezelStyle = .rounded
+        cancel.frame=NSRect(x:276,y:22,width:82,height:32);panel.contentView?.addSubview(cancel)
+        weatherLocationPanel=panel;panel.center();panel.makeKeyAndOrderFront(nil)
+        let request=WeatherLocationRequest();weatherLocationRequest=request
+        DispatchQueue.main.async{[weak self] in
+          guard let owner=self,owner.weatherLocationBusy,owner.weatherLocationRequest===request else{return}
+          request.begin{[weak self] result in
+            guard let self=self else{return};self.weatherLocationBusy=false;self.weatherLocationRequest=nil
+            self.weatherLocationPanel?.close();self.weatherLocationPanel=nil
+            switch result {
+            case .success(let place):
+                do{
+                    try place.save(to:self.weatherLocationURL);self.weatherPlace=place
+                    self.load();self.prefs.selectedScene=11;self.prefs.selectionToken=nextToken(self.prefs.selectionToken);self.save()
+                    let alert=NSAlert();alert.messageText="Weather location saved"
+                    alert.informativeText="\(place.city) is saved on this Mac. The forecast will refresh now. Location access stops after this fix; choose Select Location again if you move."
+                    alert.runModal()
+                }catch{self.showError("Could not save the weather location: \(error.localizedDescription)")}
+            case .failure(let error):if (error as? WeatherLocationError) != .cancelled{self.showError(error.localizedDescription)}
+            }
+            self.prepareMenuIfNeeded()
+          }
+        }
+    }
+    @objc func cancelWeatherLocation(_ sender:NSButton){
+        weatherLocationRequest?.cancel()
+        weatherLocationRequest=nil;weatherLocationBusy=false;weatherLocationPanel?.close();weatherLocationPanel=nil
+        prepareMenuIfNeeded()
     }
     func sourceTitle(_ key:String)->String? {
         guard let values=health["sources"] as? [String:[String:Any]],let value=values[key] else{return nil}
         let label=value["label"] as? String ?? key
         let delivered=value["source_observed_at"] as? Double ?? value["last_fetched_at"] as? Double ?? 0
         let age=max(0,Int(Date().timeIntervalSince1970-delivered))
-        let status=delivered==0 ? "Waiting":age<60 ? "Updated \(age)s ago":"Updated \(age/60)m ago"
+        let status=(value["pending"] as? Bool ?? false) ? "Updating location…":delivered==0 ? "Waiting":age<60 ? "Updated \(age)s ago":"Updated \(age/60)m ago"
         return "\(label) · \(status)"
     }
     func refreshSourceItems(){
@@ -328,7 +418,48 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
         }catch{showError("Could not save connection: \(error.localizedDescription)")}
     }
     @objc func changeConnection(_ sender:NSMenuItem){
-        connectionSettings["mode"]=["usb","bluetooth","auto"][sender.tag];saveConnection()
+        connectionSettings["mode"]=["usb","bluetooth","auto","wifi"][sender.tag];saveConnection()
+    }
+    @objc func findUSBDisplay(_ sender:NSMenuItem){
+        let python=Bundle.main.object(forInfoDictionaryKey:"XIAOPythonPath") as? String ?? ""
+        let script=Bundle.main.resourceURL!.appendingPathComponent("companion/display_transport.py")
+        DispatchQueue.global(qos:.userInitiated).async{[weak self] in
+            let process=Process(),output=Pipe();process.executableURL=URL(fileURLWithPath:python)
+            process.arguments=["-B",script.path,"--usb"];process.standardOutput=output
+            var result:[String:Any]=[:]
+            do{
+                try process.run()
+                let timeout=DispatchWorkItem{if process.isRunning{process.terminate()}}
+                DispatchQueue.global().asyncAfter(deadline:.now()+10,execute:timeout)
+                let data=output.fileHandleForReading.readDataToEndOfFile();process.waitUntilExit();timeout.cancel()
+                result=(try? JSONSerialization.jsonObject(with:data)) as? [String:Any] ?? [:]
+            }catch{result=["error":error.localizedDescription]}
+            let snapshot=result
+            DispatchQueue.main.async{
+                guard let self=self else{return}
+                guard let devices=snapshot["devices"] as? [[String:String]],!devices.isEmpty else{self.showError("No XIAO USB board found. Check the data cable and USB connection.");return}
+                NSApp.activate(ignoringOtherApps:true)
+                let alert=NSAlert();alert.messageText="Choose USB display";alert.informativeText="Select the connected board to control. Your scenes and profiles are kept."
+                let choices=NSPopUpButton(frame:NSRect(x:0,y:0,width:390,height:28),pullsDown:false)
+                for device in devices{choices.addItem(withTitle:"\(device["name"] ?? "USB board") · \(device["serial"] ?? "")")}
+                if let index=devices.firstIndex(where:{$0["serial"]==self.connectionSettings["usb_serial"]}){choices.selectItem(at:index)}
+                alert.accessoryView=choices;alert.addButton(withTitle:"Use Display");alert.addButton(withTitle:"Cancel")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    let chosen=devices[choices.indexOfSelectedItem]
+                    let previous=self.connectionSettings["usb_serial"],serial=chosen["serial"] ?? ""
+                    self.connectionSettings["usb_device"]=chosen["port"];self.connectionSettings["usb_serial"]=serial
+                    if previous != serial {
+                        self.connectionSettings.removeValue(forKey:"bluetooth_id");self.connectionSettings.removeValue(forKey:"bluetooth_usb_serial")
+                        let normalized=serial.filter{$0.isHexDigit}.lowercased()
+                        let host="xiao-display-"+String(normalized.suffix(6))+".local"
+                        let record=object(dataRoot.appendingPathComponent("private/wifi/\(host).json"))
+                        self.connectionSettings["wifi_host"]=(record["serial"] as? String)==normalized ? host:nil
+                        self.health=["display_connected":false]
+                    }
+                    self.connectionSettings["mode"]="usb";self.saveConnection()
+                }
+            }
+        }
     }
     @objc func findBluetooth(_ sender:NSMenuItem){
         guard !bluetoothScanRunning else{return};bluetoothScanRunning=true
@@ -350,7 +481,8 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
                 for device in devices{choices.addItem(withTitle:(device["name"] ?? "Display")+" · "+String((device["id"] ?? "").suffix(6)))}
                 alert.accessoryView=choices;NSApp.activate(ignoringOtherApps:true)
                 if alert.runModal() == .alertFirstButtonReturn{
-                    self.connectionSettings=["mode":"bluetooth","bluetooth_id":devices[choices.indexOfSelectedItem]["id"] ?? ""]
+                    self.connectionSettings["mode"]="bluetooth";self.connectionSettings["bluetooth_id"]=devices[choices.indexOfSelectedItem]["id"] ?? ""
+                    self.connectionSettings["bluetooth_usb_serial"]=self.connectionSettings["usb_serial"]
                     self.saveConnection()
                 }
             }
@@ -376,7 +508,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     @objc func changePower(_ sender:NSMenuItem){load();prefs.power=sender.tag;save()}
     func currentProfileSettings()->ProfileSettings {
         let fresh=connected && device["error"]==nil && (device["revision"] as? UInt32)==prefs.revision
-        let scene=fresh ? currentScene:((2...10).contains(prefs.selectedScene) ? prefs.selectedScene:currentScene)
+        let scene=fresh ? currentScene:((2...11).contains(prefs.selectedScene) ? prefs.selectedScene:currentScene)
         return ProfileSettings(prefs,currentScene:scene,day:fresh ? device["day_brightness"] as? Int:nil,night:fresh ? device["night_brightness"] as? Int:nil)
     }
     @objc func chooseProfile(_ sender:NSMenuItem){
@@ -442,7 +574,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
 }
 @main struct HelperMain {
     static func main(){
-        if CommandLine.arguments.contains("--version"){print("XIAO Display Helper 2.2.2");return}
+        if CommandLine.arguments.contains("--version"){print("XIAO Display Helper 2.7.0");return}
         let app=NSApplication.shared
         let delegate=AppDelegate();app.delegate=delegate;withExtendedLifetime(delegate){app.run()}
     }

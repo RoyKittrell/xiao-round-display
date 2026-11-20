@@ -1,4 +1,7 @@
 #pragma once
+#if defined(ARDUINO_ARCH_ESP32)
+#include "HostLinkESP32.h"
+#else
 #include <Arduino.h>
 #include <bluefruit.h>
 
@@ -99,3 +102,4 @@ class HostLink:public Stream {
  using Print::write;
 };
 HostLink* HostLink::instance=nullptr;
+#endif

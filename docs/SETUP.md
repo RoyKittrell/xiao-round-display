@@ -2,10 +2,15 @@
 
 ## 1. Verify the hardware
 
-This source targets the nRF54LM20A Sense with 512 KB RAM and 2 MB internal NVM,
-paired with the GC9A01A Seeed Round Display. Other XIAOs may have different
-memory, pin mappings and upload methods. An external USB debugger is not needed
-when using this board's built-in CMSIS-DAP bridge.
+Choose the exact XIAO model before compiling. The shared sketch supports the
+standard ESP32-S3, ESP32-C6 and nRF54LM20A Sense with the GC9A01A Round Display.
+The helper identifies a board once compatible firmware is running; an empty
+controller still needs its first correct USB upload. See [HARDWARE.md](HARDWARE.md)
+for the support matrix and ESP32 Arduino profiles. Never use an S3 binary on a
+C6 or Nordic chip. Upload is explicit; the helper does not flash hardware.
+
+The Nordic instructions below apply only to the original nRF54 board. Its
+built-in CMSIS-DAP bridge means no external debugger is needed.
 
 The tested Arduino platform is the community
 [nrf54-arduino-core](https://github.com/lolren/nrf54-arduino-core), **1.0.21**.
@@ -138,7 +143,8 @@ devices; do not run two workers against one USB port.
 Start with USB and verify scene selection and brightness first. Then follow
 [BLUETOOTH.md](BLUETOOTH.md) to discover and explicitly pair your own display.
 No Bluetooth device is preselected, and a fresh helper does not scan until
-requested. The controller has Bluetooth LE and no Wi-Fi.
+requested. The nRF54 controller has Bluetooth LE and no Wi-Fi. ESP32 boards also have
+Wi-Fi hardware; follow [WIFI.md](WIFI.md) after the matching firmware upload.
 
 Bluetooth controls were exercised on the originating hardware; the final
 package's permission/reconnection check remains pending. Keep USB available
@@ -195,7 +201,7 @@ Check the top double-tap, centre tap and brightness swipe on your own panel.
 If coordinates are wrong, stop the helper, open Serial Monitor at115200 baud
 and send `c`. Hold each of the four gold dots until captured, lifting your
 finger between dots. The calibration result is printed to serial; calibration
-is in memory and does not persist across reset. If a nonzero orientation is
+persists in ESP32 NVS, while the Nordic build keeps it in memory only. If a nonzero orientation is
 needed, keep that result in your local `TouchCoordinates.orientation` default
 in `XiaoPlayground/TouchCalibration.h`, then rebuild. Close Serial Monitor before
 restarting the helper.
@@ -204,3 +210,14 @@ Touch and RTC share I²C. Automatic bus recovery is included, but intermittent
 SDA-low stalls have occurred on the originating hardware. Check power and
 connections and try a full power cycle if both stop responding; this is not a
 claim that every panel fault is recoverable in software.
+
+## 10. Local weather (opt-in)
+
+Enable the source explicitly with `python companion/configure.py --enable weather`,
+then restart the helper. Choose Scenes → Weather → Select Location and grant
+macOS location permission. One location is saved locally; no continuous tracking
+or example city is configured. Missing location shows unavailable data rather
+than silently fetching a developer’s home forecast. Open-Meteo weather data is
+attributed under CC BY 4.0 in the app. Centre taps toggle the 12/24-hour rain ring.
+The weather location does not silently change the fixed civil clock offset;
+configure that separately when moving between timezones.

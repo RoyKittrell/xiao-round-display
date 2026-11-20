@@ -1,11 +1,20 @@
 """Exercise BLE stream semantics with fake GATT; no real radio or accounts."""
 from pathlib import Path
+import asyncio,json,sys,tempfile,unittest
 from unittest.mock import patch
 from types import SimpleNamespace
-import asyncio,json,sys,tempfile,unittest
 ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'companion'))
-from display_transport import ReceiveBuffer,BluetoothSession,endpoint,connection,is_connected
+from display_transport import ReceiveBuffer,BluetoothSession,endpoint,connection
+import display_transport as transport
 class Transport(unittest.TestCase):
+ def test_empty_template_has_no_connected_device(self):
+  self.assertFalse(transport.is_connected(""))
+ def test_usb_serial_selection_and_reused_port(self):
+  settings={'usb_serial':'00:11:22:33:44:55','usb_device':'/dev/cu.usbmodemOld'}
+  with patch.object(transport,'_usb_cache',(0,[])),patch.object(transport,'usb_devices',return_value=[{'port':'/dev/cu.usbmodemNew','serial':'001122334455','name':'C6'}]):
+   self.assertEqual(transport.selected_usb(settings,'/dev/cu.original'),'/dev/cu.usbmodemNew')
+  with patch.object(transport,'_usb_cache',(0,[])),patch.object(transport,'usb_devices',return_value=[{'port':'/dev/cu.usbmodemOld','serial':'another-board','name':'Other'}]):
+   self.assertTrue(transport.selected_usb(settings,'/dev/cu.original').startswith('/dev/cu.xiao-missing-'))
  def test_fragmented_lines_and_timeout_preserve_data(self):
   b=ReceiveBuffer();b.feed(b'ACK C|1|');self.assertEqual(b.readline(.001),b'')
   b.feed(b'2\nACK U\n');self.assertEqual(b.readline(.001),b'ACK C|1|2\n');self.assertEqual(b.readline(.001),b'ACK U\n')
@@ -21,7 +30,6 @@ class Transport(unittest.TestCase):
    prefs.write_text(json.dumps({'mode':'auto','bluetooth_id':identifier}))
    self.assertEqual(endpoint(root,str(usb)),'ble://'+identifier)
    self.assertEqual(endpoint(root,''),'ble://'+identifier)
-   self.assertFalse(is_connected(''))
    usb.touch();self.assertEqual(endpoint(root,str(usb)),str(usb))
    prefs.write_text(json.dumps({'mode':'bluetooth','bluetooth_id':identifier}));self.assertEqual(endpoint(root,str(usb)),'ble://'+identifier)
    prefs.write_text('{bad');self.assertEqual(connection(root),{'mode':'usb'})

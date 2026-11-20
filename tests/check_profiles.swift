@@ -16,6 +16,14 @@ import Foundation
         assert(work.name=="Work" && store.library.profiles.count==1)
         let reload=try ProfileStore(url:url)
         assert(reload.library.profiles[0].settings==snapshot && reload.library.selectedProfileId==work.id)
+        // Older preferences/profile files have no face mask; that means all.
+        let legacyDecoder=JSONDecoder();legacyDecoder.keyDecodingStrategy = .convertFromSnakeCase
+        let oldPreferences=try legacyDecoder.decode(Preferences.self,from:Data(#"{"schema_version":1,"revision":1,"enabled_mask":511,"carousel":true,"interval_seconds":900,"day_brightness":60,"night_brightness":60,"appearance":0,"power":0,"selected_scene":2,"selection_token":0,"brightness_token":0}"#.utf8))
+        assert(oldPreferences.includedClocks==1023)
+        var subset=current;subset.includedClocks=513
+        let selectedFaces=ProfileSettings(subset,currentScene:2)
+        assert(selectedFaces.applying(to:Preferences(),applyBrightness:false).includedClocks==513)
+        assert(!selectedFaces.matches(snapshot))
         let text=try String(contentsOf:url,encoding:.utf8)
         assert(text.contains("enabled_mask") && !text.contains("brightness_token") && !text.contains("revision"))
 
@@ -45,7 +53,7 @@ import Foundation
         let paused=try reload.save(name:"Paused",settings:empty)
         let pausedReload=try ProfileStore(url:url);assert(pausedReload.library.profiles.last!.settings.enabledMask==0)
         try reload.delete(paused.id)
-        var invalid=snapshot;invalid.enabledMask=512
+        var invalid=snapshot;invalid.enabledMask=1024
         let before=try Data(contentsOf:url)
         do{_ = try reload.save(name:"Broken",settings:invalid);fatalError("Accepted invalid scene mask")}catch ProfileError.invalidSettings{}
         let after=try Data(contentsOf:url);assert(after==before)

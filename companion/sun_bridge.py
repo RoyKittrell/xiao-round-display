@@ -94,16 +94,23 @@ def send(pixels,meta,device,on_progress=None):
   fields=['@B']+[str(meta[k]) for k in ('image_epoch','fetched_epoch','kp_epoch','scales_epoch','flare_epoch','xray_epoch','kp','g','r','s','xray','flare')]
   port.write(('|'.join(fields)+'\n').encode());port.flush();wait_for(port,'ACK B')
   for row in range(240):
-   for col in range(0,240,32):
-    data=b''.join(x.to_bytes(2,'big') for x in pixels[row*240+col:row*240+min(col+32,240)])
-    packet=f'@P|{row}|{col}|{data.hex()}|{binascii.crc_hqx(data,0xffff):04x}\n'.encode()
+   # TLS has bounded flow control and a larger RX ring, so reuse the
+   # firmware's complete-row protocol. USB/BLE retain their proven small
+   # patches; sending certificate-sized bursts over native CDC loses bytes.
+   wifi=str(device).startswith('wifi://')
+   for col in ([0] if wifi else range(0,240,32)):
+    count=240 if wifi else min(32,240-col)
+    data=b''.join(x.to_bytes(2,'big') for x in pixels[row*240+col:row*240+col+count])
+    body=f'@R|{row}' if wifi else f'@P|{row}|{col}'
+    packet=f'{body}|{data.hex()}|{binascii.crc_hqx(data,0xffff):04x}\n'.encode()
+    acknowledgement=f'ACK R {row}' if wifi else f'ACK P {row} {col}'
     for attempt in range(3):
      port.write(packet);port.flush()
-     try:wait_for(port,f'ACK P {row} {col}',3);break
+     try:wait_for(port,acknowledgement,3);break
      except TimeoutError:
       if attempt==2:raise
-    if on_progress and str(device).startswith('ble://'):on_progress(port)
-   if on_progress and not str(device).startswith('ble://') and row%2==1:on_progress(port)
+    if on_progress and (wifi or str(device).startswith('ble://')):on_progress(port)
+   if on_progress and not wifi and not str(device).startswith('ble://') and row%2==1:on_progress(port)
    if row%60==59:print(f'Sun transfer {row+1}/240 rows',flush=True)
   port.write(b'@E\n');port.flush();wait_for(port,'ACK E')
   print('Updated XIAO: dated Sun image, NOAA observations, and RTC',flush=True)

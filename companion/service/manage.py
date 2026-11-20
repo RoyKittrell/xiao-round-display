@@ -67,18 +67,21 @@ def prepare_runtime():
 def build(python_path=None):
  staged=Path(tempfile.mkdtemp(prefix='xiao-helper-build-',dir='/tmp'))/(NAME+'.app');contents=staged/'Contents';macos=contents/'MacOS';macos.mkdir(parents=True,exist_ok=True)
  info={'CFBundleName':NAME,'CFBundleDisplayName':NAME,'CFBundleIdentifier':LABEL,
-       'CFBundleExecutable':NAME,'CFBundlePackageType':'APPL','CFBundleVersion':'14',
-       'CFBundleShortVersionString':'2.2.2','LSUIElement':True,
+       'CFBundleExecutable':NAME,'CFBundlePackageType':'APPL','CFBundleVersion':'20',
+       'CFBundleShortVersionString':'2.7.0','LSUIElement':True,
        'XIAOPythonPath':str(python_path or Path(sys.executable).absolute()),
        'NSBluetoothAlwaysUsageDescription':'Connects to your XIAO Round Display to send scene controls and live information without USB.',
-       'NSLocalNetworkUsageDescription':'Reads your printer status to show print progress on your XIAO display.',
+        'NSLocationUsageDescription':'Uses your location once to save a weather forecast location for your display.',
+       'NSLocationWhenInUseUsageDescription':'Uses your location once for local weather.',
+       'NSLocationTemporaryUsageDescriptionDictionary':{'WeatherLocation':'Saves your weather location once without continuous tracking.'},
+       'NSLocalNetworkUsageDescription':'Connects to your XIAO display over local Wi-Fi and reads printer status when you enable that source.',
        'NSHumanReadableCopyright':"XIAO Display — USB display updater"}
  (contents/'Info.plist').write_bytes(plistlib.dumps(info))
  runtime=contents/'Resources/companion';runtime.mkdir(parents=True,exist_ok=True)
- for filename in ('display_bridge.py','codex_usage.py','sun_bridge.py','bambu_status.py','helper_runtime.py','display_control.py','scenes.json','process_owner.py','runtime_config.py','display_transport.py'):
+ for filename in ('display_bridge.py','codex_usage.py','sun_bridge.py','bambu_status.py','helper_runtime.py','display_control.py','scenes.json','process_owner.py','runtime_config.py','display_transport.py','hardware_profile.py','weather_status.py','wifi_setup.py','wifi_transport.py','clock-faces.json'):
   shutil.copyfile(ROOT/'companion'/filename,runtime/filename)
  shutil.copytree(ROOT/'companion/sources',runtime/'sources',ignore=shutil.ignore_patterns('__pycache__','*.pyc'),copy_function=shutil.copyfile)
- subprocess.run(['/usr/bin/swiftc','-swift-version','5','-module-cache-path','/tmp/xiao-swift-cache','-O',str(ROOT/'companion/menu_bar/MenuBar.swift'),str(ROOT/'companion/menu_bar/Profiles.swift'),str(ROOT/'companion/menu_bar/BluetoothSearch.swift'),'-o',str(macos/NAME),'-framework','AppKit'],check=True)
+ subprocess.run(['/usr/bin/swiftc','-swift-version','5','-module-cache-path','/tmp/xiao-swift-cache','-O',str(ROOT/'companion/menu_bar/MenuBar.swift'),str(ROOT/'companion/menu_bar/Profiles.swift'),str(ROOT/'companion/menu_bar/BluetoothSearch.swift'),str(ROOT/'companion/menu_bar/WeatherLocation.swift'),str(ROOT/'companion/menu_bar/WifiSetup.swift'),'-o',str(macos/NAME),'-framework','AppKit','-framework','CoreLocation','-framework','CoreWLAN'],check=True)
  subprocess.run(['/usr/bin/codesign','--force','--sign','-','--identifier',LABEL,str(staged)],check=True)
  subprocess.run([str(macos/NAME),'--version'],check=True)
  with zipfile.ZipFile(SERVICE/(NAME+'.app.zip'),'w',zipfile.ZIP_DEFLATED) as archive:

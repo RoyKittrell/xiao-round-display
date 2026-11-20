@@ -8,7 +8,7 @@ def run(*args):subprocess.run(args,cwd=ROOT,env=env,check=True)
 for folder in ('companion','tests','tools','assets'):
     for p in (ROOT/folder).rglob('*.py'):ast.parse(p.read_text(),filename=str(p))
 for name in ('test_public_template.py','check_display_control.py','check_clock_recovery.py','check_display_schedule.py',
-             'check_helper_runtime.py','check_transport.py','check_service_install.py','check_process_owner.py','check_bambu.py','check_codex_usage.py','check_sun_bridge.py'):
+             'check_helper_runtime.py','check_hardware_profile.py','check_transport.py','check_service_install.py','check_process_owner.py','check_bambu.py','check_codex_usage.py','check_sun_bridge.py','check_scene_options.py','check_s3_memory.py','check_weather.py'):
     run(sys.executable,'-B',str(ROOT/'tests'/name))
 with tempfile.TemporaryDirectory(prefix='xiao-check-',dir='/tmp') as tmp:
     for name in ('check_clock','check_sun_information','check_frame_tiles','check_host_link'):

@@ -9,7 +9,7 @@ REVIEWED_MEDIA={'docs/media/xiao-display-showcase.gif':'dd8205b091c175a74f15963f
 
 def audit(paths):
     errors=[]
-    forbidden_names={'settings.json','display-profiles.json','display-preferences.json','control-status.json','helper-status.json','display-connection.json','bluetooth-status.json'}
+    forbidden_names={'settings.json','display-profiles.json','display-preferences.json','control-status.json','helper-status.json','display-connection.json','bluetooth-status.json','hardware-status.json','weather-location.json','wifi-setup-status.json','display-pairings.json'}
     patterns=[r'/Users/[A-Za-z0-9_.-]+/',r'/home/[A-Za-z0-9_.-]+/',
               r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
               r'gh[pousr]_[A-Za-z0-9]{30,}',r'github_pat_[A-Za-z0-9_]{30,}',
@@ -19,7 +19,7 @@ def audit(paths):
     for path in paths:
         rel=path.relative_to(ROOT)
         if any(p in EXCLUDED for p in rel.parts):continue
-        if path.name in forbidden_names or 'private' in rel.parts or any(part.startswith('python-runtime') for part in rel.parts) or path.suffix.lower() in ('.pem','.key','.p12','.elf','.hex','.bin','.uf2','.pyc','.zip'):
+        if path.name in forbidden_names or (path.suffix==".tmp" and path.with_suffix(".json").name in forbidden_names) or 'private' in rel.parts or any(part.startswith('python-runtime') for part in rel.parts) or path.suffix.lower() in ('.pem','.key','.p12','.elf','.hex','.bin','.uf2','.pyc','.zip'):
             errors.append((str(rel),'local/generated/credential file'));continue
         if str(rel) in REVIEWED_MEDIA:
             data=path.read_bytes()
