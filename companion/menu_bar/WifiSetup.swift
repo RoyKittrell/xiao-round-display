@@ -24,6 +24,7 @@ extension AppDelegate {
         guard alert.runModal() == .alertFirstButtonReturn else{return}
         let ssid=name.stringValue,key=password.stringValue;password.stringValue=""
         guard !ssid.isEmpty,!key.isEmpty else{showError("Enter the network name and password.");return}
+        let requestedId=selectedDeviceId,requestedEpoch=selectionEpoch
         wifiSetupRunning=true;prepareMenuIfNeeded()
         let python=Bundle.main.object(forInfoDictionaryKey:"XIAOPythonPath") as? String ?? ""
         let script=Bundle.main.resourceURL!.appendingPathComponent("companion/wifi_setup.py")
@@ -45,6 +46,7 @@ extension AppDelegate {
             DispatchQueue.main.async{
                 guard let self=self,!self.quitting else{return}
                 self.wifiSetupRunning=false
+                guard self.selectedDeviceId==requestedId,self.selectionEpoch==requestedEpoch else{self.prepareMenuIfNeeded();return}
                 defer{self.prepareMenuIfNeeded()}
                 if let error=snapshot["error"] as? String{self.showError(error);return}
                 if let host=snapshot["host"] as? String{self.connectionSettings["wifi_host"]=host}

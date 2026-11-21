@@ -13,8 +13,13 @@ in application support, not tracked source. Local firmware overrides are ignored
 
 Preserve all scenes/assets when a menu preference changes. Maintain native-menu
 caching and the persistent checklist; avoid rebuilding menus or doing network
-work on the UI thread. One Python worker owns the selected display transport (USB, explicitly paired
-Bluetooth, or USB-provisioned certificate-pinned Wi-Fi). New integrations use the
+work on the UI thread. One independent Python worker owns each remembered device and its selected
+transport (USB, explicitly paired Bluetooth, or USB-provisioned certificate-pinned
+Wi-Fi). Menu selection changes the view; it must not stop other devices.
+Device-purpose modules are declared in device_profiles/catalog.json. Changing
+purpose is an explicit USB application-only installation, never a menu-selection
+side effect. Preserve device-scoped settings, recovery backups and positive
+hardware/partition checks. New integrations use the
 allowlisted source registry and bounded CRC packets. Do not issue printer-control
 commands from the status monitor. Startup brightness is60%, with first-frame
 blanking; preserve true0% and screen-off support, and do not replay cached levels.

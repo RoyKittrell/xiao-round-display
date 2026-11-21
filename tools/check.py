@@ -8,10 +8,10 @@ def run(*args):subprocess.run(args,cwd=ROOT,env=env,check=True)
 for folder in ('companion','tests','tools','assets'):
     for p in (ROOT/folder).rglob('*.py'):ast.parse(p.read_text(),filename=str(p))
 for name in ('test_public_template.py','check_display_control.py','check_clock_recovery.py','check_display_schedule.py',
-             'check_helper_runtime.py','check_hardware_profile.py','check_transport.py','check_service_install.py','check_process_owner.py','check_bambu.py','check_codex_usage.py','check_sun_bridge.py','check_scene_options.py','check_s3_memory.py','check_weather.py'):
+             'check_gym_helper.py','check_multi_device.py','check_device_profiles.py','check_gym_customization.py','check_gym_storage.py','check_watch_callbacks.py','check_estimated_power.py','check_helper_runtime.py','check_hardware_profile.py','check_transport.py','check_service_install.py','check_process_owner.py','check_bambu.py','check_codex_usage.py','check_sun_bridge.py','check_scene_options.py','check_s3_memory.py','check_weather.py'):
     run(sys.executable,'-B',str(ROOT/'tests'/name))
 with tempfile.TemporaryDirectory(prefix='xiao-check-',dir='/tmp') as tmp:
-    for name in ('check_clock','check_sun_information','check_frame_tiles','check_host_link'):
+    for name in ('check_cycling_cadence','check_clock','check_sun_information','check_frame_tiles','check_host_link'):
         exe=str(Path(tmp)/name)
         run('clang++','-std=c++17','-O1','-fsanitize=address,undefined','-I',str(ROOT/'tests/host_link_stubs') if name=='check_host_link' else str(ROOT/'tests'),str(ROOT/'tests'/(name+'.cpp')),'-o',exe)
         run(exe)
@@ -27,6 +27,7 @@ with tempfile.TemporaryDirectory(prefix='xiao-check-',dir='/tmp') as tmp:
         run(exe)
         run(sys.executable,'-B',str(ROOT/'tests/benchmark_menu.py'))
         run(sys.executable,'-B',str(ROOT/'tests/check_bluetooth_search.py'))
+        run(sys.executable,'-B',str(ROOT/'tests/check_gym_menu.py'))
 run(sys.executable,'-B',str(ROOT/'tools/privacy_audit.py'))
 print('PASS offline suite; no live account/printer/hardware actions performed')
 test_data.cleanup()

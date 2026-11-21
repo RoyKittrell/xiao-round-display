@@ -11,6 +11,9 @@ Local state is in `~/Library/Application Support/XIAO Display Helper/`:
 | settings.json | Explicit device, source and civil-time/location settings |
 | display-preferences.json | Scene inclusion, carousel, appearance, power and brightness requests |
 | display-profiles.json | Named settings snapshots |
+| device-catalog.json, device-connections.json, device-names.json | Remembered boards, per-device connection choices and local aliases |
+| devices/ | Per-device preferences, telemetry, operational logs and private firmware recovery copies |
+| gym-actions.json, gym-status.json | Targeted Gym settings requests and acknowledged values |
 | display-connection.json | Locally chosen transport and macOS Bluetooth device UUID |
 | bluetooth-status.json | Local discovery/connection phase |
 | python-runtime/ | Installed Python dependencies; no source credentials are copied |
@@ -46,6 +49,11 @@ Bluetooth scanning happens only after an explicit menu request or when a saved
 Bluetooth connection is selected. Connections target the locally chosen UUID;
 no other user's device is built in. The firmware requires an authenticated,
 encrypted link for control/data writes and can retain bonds on the board.
+Gym Bluetooth is a separate read/notify-only cycling sensor interface using
+normal encrypted bonding. It sends real crank events and estimated watts to a
+Watch; no writable Mac control service is exposed. Desktop control/data links
+retain their authenticated-write requirements.
+
 Display packets contain the same scene/status data as USB, never printer LAN
 codes or Codex authentication tokens. Bluetooth does not fetch internet data
 independently and provides no firmware-update service.

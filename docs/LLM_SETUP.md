@@ -10,12 +10,16 @@ README.md, docs/SETUP.md, docs/PRIVACY.md and AGENTS.md before making changes.
    distinguish S3/C6 or identify an unflashed board. Never silently flash.
 2. Discover serial devices locally; let the owner identify the intended one.
    Discover/verify the probe UID before any authorized upload.
-3. Ask which sources they want: none, Sun/NOAA, their Codex usage, their Bambu
+3. Ask whether this device should use Desktop or Gym Display. Use the catalog in
+   device_profiles/catalog.json; Gym and in-helper purpose installation currently
+   support only S3. Follow docs/GYM.md for sensor verification. Profile installation
+   requires an explicit user action, USB identity/partition checks and recovery.
+4. Ask which sources they want: none, Sun/NOAA, their Codex usage, their Bambu
    status, or weather. Every source is disabled by default. Do not query accounts just to
    see whether they exist.
-4. Ask for civil UTC offset and whether they want an observer location. They may
+5. Ask for civil UTC offset and whether they want an observer location. They may
    leave UTC/no observer. Explain that fixed offsets do not implement DST.
-5. Ask which scenes to include and whether to use carousel/hold. Use the menu
+6. Ask which scenes to include and whether to use carousel/hold. Use the menu
    and Profiles; do not delete other scenes to implement a preference.
 
 ## Configure with the provided tools

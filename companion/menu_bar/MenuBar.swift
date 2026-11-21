@@ -7,14 +7,11 @@ import Dispatch
 struct Scene: Codable { let id: Int; let name: String }
 let helperName="XIAO Display Helper"
 let dataRoot=ProcessInfo.processInfo.environment["XIAO_DISPLAY_DATA_DIR"].map{URL(fileURLWithPath:$0)} ?? FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/\(helperName)")
-let prefsURL=dataRoot.appendingPathComponent("display-preferences.json")
-let statusURL=dataRoot.appendingPathComponent("control-status.json")
 let displayTimezone:TimeZone={
     let settings=object(dataRoot.appendingPathComponent("settings.json"))
     let minutes=settings["utc_offset_minutes"] as? Int ?? 0
     return TimeZone(secondsFromGMT:((-720...840).contains(minutes) ? minutes:0)*60)!
 }()
-let healthURL=dataRoot.appendingPathComponent("helper-status.json")
 let decoder:JSONDecoder={let d=JSONDecoder();d.keyDecodingStrategy = .convertFromSnakeCase;return d}()
 let encoder:JSONEncoder={let e=JSONEncoder();e.keyEncodingStrategy = .convertToSnakeCase;e.outputFormatting=[.prettyPrinted,.sortedKeys];return e}()
 func object(_ url:URL)->[String:Any] { guard let data=try? Data(contentsOf:url),let value=try? JSONSerialization.jsonObject(with:data) as? [String:Any] else{return [:]};return value }
@@ -84,6 +81,14 @@ final class CarouselChecklist:NSView {
 }
 
 final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
+    var deviceDataRoot:URL {
+        guard !selectedDeviceId.isEmpty else{return dataRoot}
+        let encoded=selectedDeviceId.utf8.map{String(format:"%02x",$0)}.joined()
+        return dataRoot.appendingPathComponent("devices").appendingPathComponent(encoded)
+    }
+    var prefsURL:URL{deviceDataRoot.appendingPathComponent("display-preferences.json")}
+    var statusURL:URL{deviceDataRoot.appendingPathComponent("control-status.json")}
+    var healthURL:URL{deviceDataRoot.appendingPathComponent("helper-status.json")}
     var item:NSStatusItem!,menu=NSMenu(),child:Process?,timer:Timer?
     var prefs=Preferences(),scenes:[Scene]=[],device:[String:Any]=[:],health:[String:Any]=[:]
     var quitting=false,sliderBox:SliderBox?
@@ -102,11 +107,17 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     var menuActivity:NSObjectProtocol?
     var connectionSettings:[String:String]=[:],bluetoothScanRunning=false,wifiSetupRunning=false
     let connectionURL=dataRoot.appendingPathComponent("display-connection.json")
+    var catalogState:[String:Any]=[:],namesState:[String:Any]=[:],gymState:[String:Any]=[:]
+    var gymSliders:[GymSliderBox]=[],gymDesired:[String:Any]=[:],gymPendingValues:[String:Any]=[:]
+    var gymSendWork:DispatchWorkItem?,gymPendingToken:String?,gymPendingAt=Date.distantPast
+    var gymFeedback:NSTextField?
     var connected:Bool {
+        guard health["selected_id"] as? String==selectedDeviceId,health["selection"] as? String==selectionEpoch else{return false}
+        if deviceCatalog[selectedDeviceId]?["online"] as? Bool == false{return false}
         let timestamp=health["updated_at"] as? Double ?? 0
         return (health["display_connected"] as? Bool ?? health["usb_connected"] as? Bool ?? false) && Date().timeIntervalSince1970-timestamp<20
     }
-    var hardware:[String:Any]{health["hardware"] as? [String:Any] ?? [:]}
+    var hardware:[String:Any]{guard health["selected_id"] as? String==selectedDeviceId,health["selection"] as? String==selectionEpoch else{return [:]};return health["hardware"] as? [String:Any] ?? [:]}
     var wifiHardware:Bool{hardware["wifi_hardware"] as? Bool ?? false}
     var wifiFirmware:Bool{hardware["wifi_firmware"] as? Bool ?? false}
     var currentScene:Int { device["scene"] as? Int ?? prefs.selectedScene }
@@ -135,7 +146,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
         NSApp.setActivationPolicy(.accessory)
         do{profileStore=try ProfileStore(url:dataRoot.appendingPathComponent("display-profiles.json"))}
         catch{showError("Could not load profiles. Your saved file has been left untouched. \(error.localizedDescription)")}
-        connectionSettings=object(connectionURL) as? [String:String] ?? ["mode":"usb"]
+        connectionSettings=object(connectionURL) as? [String:String] ?? ["mode":"usb"];loadDeviceState()
         load();item=NSStatusBar.system.statusItem(withLength:NSStatusItem.squareLength)
         if let button=item.button {
             button.image=NSImage(systemSymbolName:"circle.dotted.circle",accessibilityDescription:"XIAO display controls")
@@ -205,17 +216,20 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     }
     func pollState(){
         guard !stateReadPending,!quitting else{return};stateReadPending=true
-        let revisionWhenRequested=prefs.revision
+        let revisionWhenRequested=prefs.revision,deviceWhenRequested=selectedDeviceId,epochWhenRequested=selectionEpoch
+        let prefsPath=prefsURL,statusPath=statusURL,healthPath=healthURL,gymPath=deviceDataRoot.appendingPathComponent("gym-status.json")
         stateQueue.async{[weak self] in
             let reader=JSONDecoder();reader.keyDecodingStrategy = .convertFromSnakeCase
-            let saved=(try? Data(contentsOf:prefsURL)).flatMap{try? reader.decode(Preferences.self,from:$0)}
-            let deviceState=object(statusURL),workerState=object(healthURL)
+            let saved=(try? Data(contentsOf:prefsPath)).flatMap{try? reader.decode(Preferences.self,from:$0)}
+            let deviceState=object(statusPath),workerState=object(healthPath)
+            let catalog=object(dataRoot.appendingPathComponent("device-catalog.json")),names=object(dataRoot.appendingPathComponent("device-names.json")),gym=object(gymPath)
             DispatchQueue.main.async{
                 guard let self=self else{return};self.stateReadPending=false
+                guard self.selectedDeviceId==deviceWhenRequested,self.selectionEpoch==epochWhenRequested else{return}
                 // A slow read must never overwrite a more recent checkbox,
                 // profile or slider action performed while it was in flight.
                 if self.prefs.revision==revisionWhenRequested,let saved=saved{self.prefs=saved}
-                self.device=deviceState;self.health=workerState
+                self.device=deviceState;self.health=workerState;self.catalogState=catalog;self.namesState=names;self.gymState=gym;self.updateGymControls()
                 self.carouselChecklist?.update(mask:self.prefs.enabledMask);self.clockChecklist?.update(mask:self.prefs.includedClocks);self.updateTip()
                 // Keep navigation stable: source-age labels are snapshots on opening.
                 if self.menuIsOpen{self.updateBrightnessFeedback()}
@@ -225,13 +239,14 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     }
     func load(){
         if let data=try? Data(contentsOf:prefsURL),let value=try? decoder.decode(Preferences.self,from:data){prefs=value}
+        else if selectedRole=="desktop",let data=try? Data(contentsOf:dataRoot.appendingPathComponent("display-preferences.json")),let value=try? decoder.decode(Preferences.self,from:data){prefs=value}
         device=object(statusURL);health=object(healthURL)
         carouselChecklist?.update(mask:prefs.enabledMask)
         clockChecklist?.update(mask:prefs.includedClocks)
     }
     @discardableResult func save()->Bool {
         prefs.revision = prefs.revision == UInt32.max ? 1:prefs.revision+1
-        do{try FileManager.default.createDirectory(at:dataRoot,withIntermediateDirectories:true);try encoder.encode(prefs).write(to:prefsURL,options:.atomic);return true}catch{showError("Could not save display settings: \(error.localizedDescription)");return false}
+        do{try FileManager.default.createDirectory(at:deviceDataRoot,withIntermediateDirectories:true);try encoder.encode(prefs).write(to:prefsURL,options:.atomic);return true}catch{showError("Could not save display settings: \(error.localizedDescription)");return false}
     }
     func updateTip(){
         let name=scenes.first{$0.id==currentScene}?.name ?? "Display"
@@ -242,7 +257,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
         [String(prefs.revision),String(currentScene),String(connected),String(actualNight),
          String(device["sleeping"] as? Int ?? -1),String(device["revision"] as? UInt32 ?? 0),
          String(device["day_brightness"] as? Int ?? -1),String(device["night_brightness"] as? Int ?? -1),
-         device["error"] as? String ?? "",String(profileMenuGeneration),connectionSettings["mode"] ?? "usb",connectionSettings["bluetooth_id"] ?? "",hardware["model"] as? String ?? "",String(wifiFirmware),String(hardware["control_version"] as? Int ?? 2),String(bluetoothScanRunning),String(wifiSetupRunning),connectionSettings["wifi_host"] ?? "",String(weatherLocationBusy),weatherPlace?.city ?? ""].joined(separator:"|")
+         device["error"] as? String ?? "",String(profileMenuGeneration),selectedDeviceId,selectionEpoch,catalogSignature,selectedRole,String(hardware["watch_csc"] as? Bool ?? false),String(gymCurrent["watch_streaming"] as? Bool ?? false),String(gymCurrent["pulses_per_revolution"] as? Int ?? 1),String(gymCurrent["ready"] as? Bool ?? false),String(gymCurrent["demo"] as? Bool ?? false),connectionSettings["mode"] ?? "usb",connectionSettings["bluetooth_id"] ?? "",hardware["model"] as? String ?? "",String(wifiFirmware),String(hardware["control_version"] as? Int ?? 2),String(bluetoothScanRunning),String(wifiSetupRunning),connectionSettings["wifi_host"] ?? "",String(weatherLocationBusy),weatherPlace?.city ?? ""].joined(separator:"|")
     }
     func prepareMenuIfNeeded(){if !menuIsOpen && menuSignature != lastMenuSignature{rebuild()}}
     func menuWillOpen(_ menu:NSMenu){
@@ -268,7 +283,14 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     }
     func submenu(_ title:String)->NSMenu{let m=NSMenu();m.autoenablesItems=false;add(title).submenu=m;return m}
     func rebuild(){
-        menu.removeAllItems();add(hardware["model"] as? String ?? "Identifying XIAO…",enabled:false)
+        menu.removeAllItems();addDevicePicker()
+        if selectedRole=="gym"{addGymMenus();lastMenuSignature=menuSignature;return}
+        if selectedRole != "desktop" {
+            add(connected ? "Identifying device…":"Selected device disconnected",enabled:false)
+            add("Choose USB Device…",action:#selector(findUSBDisplay(_:)))
+            menu.addItem(.separator());add("Quit Helper",action:#selector(quitHelper(_:)));lastMenuSignature=menuSignature;return
+        }
+        add(hardware["model"] as? String ?? "Identifying XIAO…",enabled:false)
         let current=scenes.first{$0.id==currentScene}?.name ?? "Ready"
         add(connected ? "Connected via \(health["transport"] as? String == "wifi" ? "Wi-Fi":health["transport"] as? String == "bluetooth" ? "Bluetooth":"USB") · \(current)":"Display disconnected · changes will queue",enabled:false)
         if hardware["firmware_update_recommended"] as? Bool == true{add("Older firmware · update for Weather & face filters",enabled:false)}
@@ -414,11 +436,18 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     func saveConnection(){
         do{
             let data=try JSONSerialization.data(withJSONObject:connectionSettings,options:[.prettyPrinted,.sortedKeys])
-            try data.write(to:connectionURL,options:.atomic);prepareMenuIfNeeded()
+            try data.write(to:connectionURL,options:.atomic);try rememberConnection();prepareMenuIfNeeded()
         }catch{showError("Could not save connection: \(error.localizedDescription)")}
     }
     @objc func changeConnection(_ sender:NSMenuItem){
-        connectionSettings["mode"]=["usb","bluetooth","auto","wifi"][sender.tag];saveConnection()
+        guard (0...3).contains(sender.tag) else{return}
+        if selectedRole=="gym" {
+            if sender.tag==1 && hardware["watch_csc"] as? Bool == true{return}
+            if sender.tag==1 && hardware["bluetooth"] as? Bool != true{return}
+            if sender.tag==3 && !wifiFirmware{return}
+            connectionSettings["bluetooth_for_workout"]="1"
+        }
+        connectionSettings["mode"]=["usb","bluetooth","auto","wifi"][sender.tag];connectionSettings["selection_epoch"]=UUID().uuidString;gymSendWork?.cancel();gymSendWork=nil;gymDesired=[:];gymPendingValues=[:];gymPendingToken=nil;saveConnection()
     }
     @objc func findUSBDisplay(_ sender:NSMenuItem){
         let python=Bundle.main.object(forInfoDictionaryKey:"XIAOPythonPath") as? String ?? ""
@@ -446,29 +475,26 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
                 alert.accessoryView=choices;alert.addButton(withTitle:"Use Display");alert.addButton(withTitle:"Cancel")
                 if alert.runModal() == .alertFirstButtonReturn {
                     let chosen=devices[choices.indexOfSelectedItem]
-                    let previous=self.connectionSettings["usb_serial"],serial=chosen["serial"] ?? ""
-                    self.connectionSettings["usb_device"]=chosen["port"];self.connectionSettings["usb_serial"]=serial
-                    if previous != serial {
-                        self.connectionSettings.removeValue(forKey:"bluetooth_id");self.connectionSettings.removeValue(forKey:"bluetooth_usb_serial")
-                        let normalized=serial.filter{$0.isHexDigit}.lowercased()
-                        let host="xiao-display-"+String(normalized.suffix(6))+".local"
-                        let record=object(dataRoot.appendingPathComponent("private/wifi/\(host).json"))
-                        self.connectionSettings["wifi_host"]=(record["serial"] as? String)==normalized ? host:nil
-                        self.health=["display_connected":false]
-                    }
-                    self.connectionSettings["mode"]="usb";self.saveConnection()
+                    let serial=chosen["serial"] ?? ""
+                    let id="usb:"+serial.filter{$0.isLetter || $0.isNumber}.lowercased()
+                    self.selectDevice(id,record:["usb_serial":serial,"usb_device":chosen["port"] ?? ""],forceUSB:true)
                 }
             }
         }
     }
     @objc func findBluetooth(_ sender:NSMenuItem){
-        guard !bluetoothScanRunning else{return};bluetoothScanRunning=true
+        guard !bluetoothScanRunning else{return}
+        if selectedRole=="gym" && hardware["watch_csc"] as? Bool == true{showWatchPairing(sender);return}
+        if selectedRole=="gym" && hardware["bluetooth"] as? Bool != true{return}
+        bluetoothScanRunning=true
+        let requestedId=selectedDeviceId,requestedEpoch=selectionEpoch
         let python=Bundle.main.object(forInfoDictionaryKey:"XIAOPythonPath") as? String ?? ""
         let script=Bundle.main.resourceURL!.appendingPathComponent("companion/display_transport.py")
         DispatchQueue.global(qos:.userInitiated).async{[weak self] in
             let scanResult=BluetoothSearch.run(python:python,script:script)
             DispatchQueue.main.async{
                 guard let self=self,!self.quitting else{return};self.bluetoothScanRunning=false
+                guard self.selectedDeviceId==requestedId,self.selectionEpoch==requestedEpoch else{return}
                 defer{self.prepareMenuIfNeeded()}
                 if let error=scanResult["error"] as? String{self.showError(error+". Check System Settings → Privacy & Security → Bluetooth.");return}
                 guard let devices=scanResult["devices"] as? [[String:String]],!devices.isEmpty else{
@@ -481,6 +507,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
                 for device in devices{choices.addItem(withTitle:(device["name"] ?? "Display")+" · "+String((device["id"] ?? "").suffix(6)))}
                 alert.accessoryView=choices;NSApp.activate(ignoringOtherApps:true)
                 if alert.runModal() == .alertFirstButtonReturn{
+                    guard self.selectedDeviceId==requestedId,self.selectionEpoch==requestedEpoch else{return}
                     self.connectionSettings["mode"]="bluetooth";self.connectionSettings["bluetooth_id"]=devices[choices.indexOfSelectedItem]["id"] ?? ""
                     self.connectionSettings["bluetooth_usb_serial"]=self.connectionSettings["usb_serial"]
                     self.saveConnection()
@@ -574,7 +601,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
 }
 @main struct HelperMain {
     static func main(){
-        if CommandLine.arguments.contains("--version"){print("XIAO Display Helper 2.7.0");return}
+        if CommandLine.arguments.contains("--version"){print("XIAO Display Helper 2.12.0");return}
         let app=NSApplication.shared
         let delegate=AppDelegate();app.delegate=delegate;withExtendedLifetime(delegate){app.run()}
     }

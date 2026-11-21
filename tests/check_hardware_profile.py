@@ -29,7 +29,7 @@ class Hardware(unittest.TestCase):
    def flush(self):pass
    def readline(self):return self.lines.pop(0) if self.lines else b''
   with tempfile.TemporaryDirectory() as tmp:
-   h=HardwareProfile(tmp);p=Port();h.ensure(p,'wifi://one');h.ensure(p,'wifi://one');self.assertEqual(p.writes,[b'?'])
+   h=HardwareProfile(tmp);p=Port();h.ensure(p,'wifi://one');h.ensure(p,'wifi://one');self.assertEqual(p.writes,[b'?\n'])
    h.observe_boot(1);h.ensure(p,'wifi://one');self.assertEqual(len(p.writes),1)
    h.observe_boot(2);h.ensure(p,'wifi://one');self.assertEqual(len(p.writes),2)
    h.ensure(p,'usb-two');self.assertEqual(len(p.writes),3)
@@ -40,7 +40,7 @@ class Hardware(unittest.TestCase):
   from display_bridge import Dispatcher
   with tempfile.TemporaryDirectory() as tmp:
    with patch('display_bridge.ROOT',Path(tmp)):
-    dispatcher=Dispatcher(None,'usb');dispatcher.hardware.value={'scene_count':9}
+    dispatcher=Dispatcher(None,'usb');dispatcher.hardware.value={'role':'desktop','scene_count':9}
     state=SimpleNamespace(source=SimpleNamespace(id='weather'),lock=threading.Lock(),usb_error=None,next_send=0)
     dispatcher._packets(None,[(state,{'unused':'data'},1)])
     self.assertEqual(state.usb_error,'Weather needs a firmware update');self.assertGreater(state.next_send,0)

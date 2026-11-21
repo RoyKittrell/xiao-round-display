@@ -7,6 +7,15 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'companion')
 from display_transport import ReceiveBuffer,BluetoothSession,endpoint,connection
 import display_transport as transport
 class Transport(unittest.TestCase):
+ def test_gym_auto_prefers_usb_then_wifi_and_reserves_bluetooth(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   root=Path(tmp);usb=root/'usb';prefs=root/'display-connection.json'
+   v={'mode':'auto','bluetooth_for_workout':'1','bluetooth_id':'12345678-1234-1234-1234-123456789abc','wifi_host':'xiao-display-123456.local'}
+   prefs.write_text(json.dumps(v));usb.touch();self.assertEqual(endpoint(root,str(usb)),str(usb))
+   usb.unlink();self.assertEqual(endpoint(root,str(usb)),'wifi://xiao-display-123456.local')
+   del v['wifi_host'];prefs.write_text(json.dumps(v));self.assertEqual(endpoint(root,str(usb)),str(usb))
+   v.pop('bluetooth_for_workout');prefs.write_text(json.dumps(v));self.assertTrue(endpoint(root,str(usb)).startswith('ble://'))
+
  def test_empty_template_has_no_connected_device(self):
   self.assertFalse(transport.is_connected(""))
  def test_usb_serial_selection_and_reused_port(self):

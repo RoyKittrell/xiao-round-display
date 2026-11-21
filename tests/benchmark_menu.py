@@ -15,7 +15,8 @@ harness=r'''
   let delegate=AppDelegate()
   delegate.scenes=try decoder.decode([Scene].self,from:Data(contentsOf:URL(fileURLWithPath:CommandLine.arguments[1])))
   delegate.profileStore=try ProfileStore(url:URL(fileURLWithPath:"/tmp/xiao-benchmark-unused-\(UUID().uuidString).json"))
-  delegate.health=["usb_connected":true,"updated_at":Date().timeIntervalSince1970,
+  delegate.connectionSettings=["device_id":"usb:001122334455","selection_epoch":"one"]
+  delegate.health=["selected_id":"usb:001122334455","selection":"one","hardware":["role":"desktop"],"usb_connected":true,"updated_at":Date().timeIntervalSince1970,
    "sources":["codex":["label":"Codex","source_observed_at":Date().timeIntervalSince1970],
    "bambu":["label":"Bambu Printer","source_observed_at":Date().timeIntervalSince1970],
    "sun":["label":"Sun","source_observed_at":Date().timeIntervalSince1970]]]
@@ -43,7 +44,7 @@ harness=r'''
   let unchangedMS=(CFAbsoluteTimeGetCurrent()-t)*1000/10000
   assert(view.buttons.filter{$0.state == .on}.map{$0.tag} == [9,10])
   assert(view.allButton.state == .mixed)
-  view.update(mask:511);assert(view.allButton.state == .on)
+  view.update(mask:delegate.scenes.reduce(0){$0 | (1 << ($1.id-2))});assert(view.allButton.state == .on)
   view.update(mask:0);assert(view.allButton.state == .off && view.buttons.allSatisfy{$0.state == .off && $0.isEnabled})
   view.update(mask:128);assert(view.buttons.first{$0.tag==9}!.isEnabled)
   samples.sort()
@@ -57,5 +58,5 @@ harness=r'''
 with tempfile.TemporaryDirectory(prefix='xiao-menu-benchmark-',dir='/tmp') as tmp:
     src=Path(tmp)/'Benchmark.swift';src.write_text(source+harness)
     exe=Path(tmp)/'benchmark'
-    subprocess.run(['swiftc','-swift-version','5','-module-cache-path','/tmp/xiao-swift-cache','-O',str(src),str(root/'companion/menu_bar/Profiles.swift'),str(root/'companion/menu_bar/BluetoothSearch.swift'),str(root/'companion/menu_bar/WeatherLocation.swift'),str(root/'companion/menu_bar/WifiSetup.swift'),'-o',str(exe),'-framework','AppKit','-framework','CoreLocation','-framework','CoreWLAN'],check=True)
+    subprocess.run(['swiftc','-swift-version','5','-module-cache-path','/tmp/xiao-swift-cache','-O',str(src),str(root/'companion/menu_bar/Profiles.swift'),str(root/'companion/menu_bar/BluetoothSearch.swift'),str(root/'companion/menu_bar/WeatherLocation.swift'),str(root/'companion/menu_bar/WifiSetup.swift'),str(root/'companion/menu_bar/Devices.swift'),str(root/'companion/menu_bar/GymMenu.swift'),'-o',str(exe),'-framework','AppKit','-framework','CoreLocation','-framework','CoreWLAN'],check=True)
     subprocess.run([str(exe),str(root/'companion/scenes.json')],check=True)
