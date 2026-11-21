@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """One extensible Mac helper for Codex, Bambu, Sun and future display sources.
 
-Independent fetch workers -> latest-value registry -> one serial dispatcher.
+Independent per-device processes each own their source registry and transport.
+The coordinator keeps remembered displays running; menu selection is view-only.
 Reconnection replays cached small packets immediately; no source can monopolise
 network acquisition. Sun image transfers interleave all ready small packets.
 """
@@ -10,13 +11,16 @@ import argparse
 from contextlib import contextmanager
 from datetime import datetime,timezone,timedelta
 import fcntl,json,os,sys,time
+import signal
 from pathlib import Path
 import codex_usage,bambu_status,sun_bridge
 from helper_runtime import Registry
 from hardware_profile import HardwareProfile
+from device_registry import DeviceRegistry,Selection,SelectionChanged
+from gym_control import GymControl
 from display_control import Control
 from process_owner import check_owner,stop_orphan
-from display_transport import open_port,endpoint,is_connected,close_bluetooth
+from display_transport import open_port,endpoint,is_connected,close_bluetooth,set_selection_guard
 from sources import build as build_sources
 from runtime_config import DATA_ROOT,load,civil_zone
 
@@ -24,9 +28,12 @@ ROOT=DATA_ROOT
 sys.path.insert(0,str(Path(__file__).resolve().parent/'vendor'))
 import serial
 
+def state_root():return Path(os.environ.get('XIAO_DEVICE_STATE_DIR',ROOT))
+
 @contextmanager
 def usb_lock():
-    with (ROOT/'companion/usb.lock').open('a') as lock:
+    path=state_root()/'companion/usb.lock';path.parent.mkdir(mode=0o700,parents=True,exist_ok=True)
+    with path.open('a') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB);yield
 
 def sync_clock(port):
@@ -51,8 +58,16 @@ def send_printer(value,device=None,port=None):
             opened.reset_input_buffer();sync_clock(opened);send_printer(value,port=opened)
 
 class Dispatcher:
-    def __init__(self,registry,device,select=False,control=None):self.registry=registry;self.device=device;self.select=select;self.control=control;self.hardware=HardwareProfile(ROOT)
+    def __init__(self,registry,device,select=False,control=None):self.registry=registry;self.device=device;self.select=select;self.control=control;self.hardware=HardwareProfile(state_root());self.binding=None
+    def identify(self,binding):
+        with usb_lock(),open_port(self.device,115200,timeout=.15,write_timeout=5) as port:
+            port.reset_input_buffer();profile=self.hardware.ensure(port,self.device)
+        if profile.get('role')=='gym' and binding.settings.get('usb_serial'):
+            from display_transport import serial_key
+            if profile.get('chip_serial')!=serial_key(binding.settings['usb_serial']):raise SelectionChanged('Gym identity differs from selected USB serial')
+        return profile
     def small(self,port=None,force=False):
+        if self.hardware.value.get('role')!='desktop':return
         due=[]
         for state in self.registry.states:
             data,version=state.read()
@@ -62,6 +77,7 @@ class Dispatcher:
         if port is None:
             with usb_lock(),open_port(self.device,115200,timeout=.2,write_timeout=5) as opened:
                 opened.reset_input_buffer();profile=self.hardware.ensure(opened,self.device)
+                if profile.get("role")!="desktop":return
                 if self.control:self.control.protocol_version=profile.get("control_version",2)
                 sync_clock(opened)
                 if control_due:
@@ -74,6 +90,7 @@ class Dispatcher:
                 if result:self.hardware.observe_boot(result.get("boot_id"))
             self._packets(port,due)
     def _packets(self,port,due):
+        if self.hardware.value.get("role")!="desktop":return
         for state,data,version in due:
             if state.source.id=='weather' and self.hardware.value.get('scene_count',10)<10:
                 with state.lock:state.usb_error='Weather needs a firmware update'
@@ -89,12 +106,13 @@ class Dispatcher:
                 with state.lock:state.usb_error=type(error).__name__+': '+str(error)
                 raise
     def images(self):
+        if self.hardware.value.get("role")!="desktop":return
         for state in self.registry.states:
             data,version=state.read()
             if not state.source.transfer or data is None or version==state.last_sent_version:continue
             try:
                 def auxiliary(port):
-                    check_owner();self.small(port);health(self.registry,self.device,self.hardware.value)
+                    check_owner();self.small(port);health(self.registry,self.device,self.hardware.value,self.binding)
                 with usb_lock():state.source.transfer(*data,self.device,on_progress=auxiliary)
                 state.last_sent_version=version
                 with state.lock:state.delivered_at=time.time();state.usb_error=None
@@ -104,9 +122,9 @@ class Dispatcher:
                 state.last_sent_version=version
                 print(state.source.label+' transfer unavailable: '+type(error).__name__,flush=True)
 
-def health(registry,device,hardware=None):
-    path=ROOT/'helper-status.json';temporary=path.with_suffix('.tmp')
-    temporary.write_text(json.dumps({'updated_at':int(time.time()),'usb_connected':bool(device) and not str(device).startswith(('ble://','wifi://')) and Path(device).exists(),'display_connected':bool(device) and is_connected(device),'transport':'wifi' if str(device).startswith('wifi://') else 'bluetooth' if str(device).startswith('ble://') else 'usb','sources':registry.status(),'hardware':hardware or {}},indent=2)+'\n');temporary.replace(path)
+def health(registry,device,hardware=None,binding=None,online=True):
+    path=state_root()/'helper-status.json';temporary=path.with_suffix('.tmp')
+    temporary.write_text(json.dumps({'updated_at':int(time.time()),'worker_pid':os.getpid(),'usb_connected':bool(device) and not str(device).startswith(('ble://','wifi://')) and Path(device).exists(),'display_connected':online and is_connected(device),'transport':'wifi' if str(device).startswith('wifi://') else 'bluetooth' if str(device).startswith('ble://') else 'usb','sources':registry.status() if (hardware or {}).get('role')=='desktop' else {},'hardware':hardware or {},'selected_id':binding.id if binding else '', 'selection':binding.epoch if binding else ''},indent=2)+'\n');temporary.replace(path)
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
@@ -114,42 +132,79 @@ def main():
     parser.add_argument('--once',action='store_true',help='One Codex refresh; stop service first')
     parser.add_argument('--select',action='store_true',help='Select Codex on first successful delivery')
     parser.add_argument('--status',action='store_true',help='Show source/USB health without opening USB')
+    parser.add_argument('--serve-device',help=argparse.SUPPRESS)
     args=parser.parse_args()
     if args.status:
         path=ROOT/'helper-status.json'
         if not path.exists():raise SystemExit('No helper status recorded yet')
         print(path.read_text());return
-    (ROOT/'companion').mkdir(parents=True,exist_ok=True)
-    with (ROOT/'companion/sun_bridge.lock').open('a+') as lock:
+    workroot=state_root();(workroot/'companion').mkdir(mode=0o700,parents=True,exist_ok=True)
+    with (workroot/'companion/sun_bridge.lock').open('a+') as lock:
         try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         except BlockingIOError:
-            if not stop_orphan(ROOT,Path(__file__)):
+            if not stop_orphan(workroot,Path(__file__)):
                 raise SystemExit('XIAO Display Helper is already running')
             fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         lock.seek(0);lock.truncate();lock.write(str(os.getpid()));lock.flush()
         if args.once and 'codex' not in load(ROOT)['enabled_sources']:raise SystemExit('Enable Codex explicitly before querying account usage')
         if args.once:send_usage(codex_usage.snapshot(),args.device,args.select);return
-        registry=Registry(build_sources(ROOT));control=Control(ROOT);dispatcher=Dispatcher(registry,args.device,args.select,control)
-        print('Unified XIAO helper active: '+', '.join(s.source.label for s in registry.states),flush=True)
-        registry.start();connected=False;health_due=0
+        if not args.serve_device:
+            from multi_device import run
+            run(ROOT,Path(__file__));return
+        def stop(*_):raise SystemExit()
+        for s in (signal.SIGTERM,signal.SIGINT):signal.signal(s,stop)
+        registry=Registry([]);control=None;dispatcher=Dispatcher(registry,args.device,args.select)
+        print('Independent XIAO worker active: '+args.serve_device,flush=True)
+        connected=False;health_due=0;binding=None;gym=GymControl(workroot,ROOT);sources_started=False;profile_stamp=None
         try:
             while True:
-                check_owner()
-                selected=endpoint(ROOT,args.device)
-                if dispatcher.device!=selected:
-                    close_bluetooth();dispatcher.device=selected;connected=False;control.boot_id=0;dispatcher.hardware.reset(selected)
+                check_owner();current=Selection(ROOT,args.serve_device);selected=endpoint(ROOT,args.device,settings=current.settings)
+                if binding is None or binding.key!=current.key or dispatcher.device!=selected:
+                    close_bluetooth();binding=current;set_selection_guard(binding)
+                    dispatcher.device=selected;connected=False
+                    if control:control.boot_id=0
+                    dispatcher.hardware.reset(selected);gym.reset();registry.connected.clear()
+                marker=workroot/'device-profile.json'
+                stamp=marker.stat().st_mtime_ns if marker.exists() else None
+                if stamp!=profile_stamp:
+                    profile_stamp=stamp;connected=False;dispatcher.hardware.reset(selected)
+                    registry.connected.clear()
+                dispatcher.binding=binding
                 present=str(selected).startswith(('ble://','wifi://')) or bool(selected) and Path(selected).exists()
                 if not present:
-                    registry.connected.clear();connected=False;health(registry,dispatcher.device,dispatcher.hardware.value);time.sleep(1);continue
-                registry.connected.set()
-                if not connected:registry.reconnect();control.reconnect();dispatcher.hardware.reset(selected);connected=True
+                    registry.connected.clear();connected=False
+                    health(registry,selected,dispatcher.hardware.value,binding);time.sleep(.5);continue
                 try:
-                    dispatcher.small();dispatcher.images()
-                except (OSError,TimeoutError) as error:
-                    print('Display delivery unavailable: '+type(error).__name__+'; replaying on reconnect',flush=True)
-                    connected=False;time.sleep(1)
-                if time.monotonic()>=health_due:
-                    health(registry,dispatcher.device,dispatcher.hardware.value);health_due=time.monotonic()+2
-                time.sleep(.25)
-        finally:registry.close();close_bluetooth()
+                    binding.check()
+                    if not connected:
+                        profile=dispatcher.identify(binding);binding.check()
+                        if profile.get('role') not in ('desktop','gym'):
+                            registry.connected.clear();health(registry,selected,profile,binding);time.sleep(.5);continue
+                        if profile.get('role')=='gym' and sources_started:
+                            registry.close();registry=Registry([]);dispatcher.registry=registry
+                            control=None;dispatcher.control=None;sources_started=False
+                        if profile.get('role')=='desktop' and not sources_started:
+                            from multi_device import prepare_preferences
+                            prepare_preferences(ROOT,binding.id,'desktop')
+                            registry=Registry(build_sources(ROOT));registry.start();sources_started=True
+                            control=Control(workroot);dispatcher.registry=registry;dispatcher.control=control
+                        connected=True
+                        if control:control.reconnect()
+                        registry.reconnect()
+                        if profile.get('role')=='gym':gym.begin_session(binding)
+                    role=dispatcher.hardware.value.get('role')
+                    if role=='desktop':
+                        registry.connected.set();dispatcher.small();dispatcher.images()
+                    elif role=='gym':
+                        registry.connected.clear()
+                        if gym.due(binding):
+                            with usb_lock(),open_port(selected,115200,timeout=.15,write_timeout=3) as port:gym.service(port,binding)
+                    if time.monotonic()>=health_due:
+                        health(registry,selected,dispatcher.hardware.value,binding);health_due=time.monotonic()+1
+                except (OSError,TimeoutError,ValueError) as error:
+                    registry.connected.clear();connected=False;dispatcher.hardware.reset(selected)
+                    print(args.serve_device+' unavailable: '+type(error).__name__,flush=True)
+                    health(registry,selected,dispatcher.hardware.value,binding,online=False);time.sleep(.25)
+                time.sleep(.15)
+        finally:registry.close();close_bluetooth();set_selection_guard(None)
 if __name__=='__main__':main()

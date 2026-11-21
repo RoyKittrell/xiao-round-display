@@ -8,7 +8,8 @@ import binascii,fcntl,json,os,re,secrets,ssl,subprocess,sys,tempfile,time
 from serial.tools import list_ports
 from display_transport import open_port
 from hardware_profile import identify
-ROOT=Path(os.environ.get('XIAO_DISPLAY_DATA_DIR',Path.home()/'Library/Application Support/XIAO Display Helper'))
+from runtime_config import DATA_ROOT
+ROOT=DATA_ROOT
 
 def identity(serial):
     value=''.join(c.lower() for c in str(serial) if c.isalnum())
@@ -63,7 +64,8 @@ def provision(value):
     # cannot orphan the new key. Previous record remains recoverable privately.
     if target.exists():target.with_suffix('.previous.json').write_text(target.read_text());target.with_suffix('.previous.json').chmod(0o600)
     tmp=target.with_suffix('.tmp');tmp.write_text(json.dumps(record,indent=2)+'\n');tmp.chmod(0o600);tmp.replace(target)
-    lockpath=ROOT/'companion/usb.lock';lockpath.parent.mkdir(parents=True,exist_ok=True)
+    from multi_device import device_root
+    lockpath=device_root(ROOT,'usb:'+serial)/'companion/usb.lock';lockpath.parent.mkdir(parents=True,exist_ok=True)
     with lockpath.open('a') as lock:
         deadline=time.monotonic()+35
         while True:
@@ -76,8 +78,8 @@ def provision(value):
             while time.monotonic()<end:
                 line=port.readline()
                 decoded=line.decode('ascii',errors='replace').strip()
-                if decoded.startswith(('FIRMWARE ','WIFI ')):diagnostics.append(decoded)
-                if decoded.startswith('SUN rows='):break
+                if decoded.startswith(('FIRMWARE ','WIFI ','STATUS ')):diagnostics.append(decoded)
+                if decoded.startswith(('SUN rows=','UI ')):break
             profile=identify(diagnostics,boards[0].device)
             if profile['family'] not in ('esp32s3','esp32c6') or not profile['wifi_firmware']:
                 raise ValueError('The connected display needs supported ESP32 Wi-Fi firmware before setup')

@@ -4,7 +4,23 @@ The public r34 source is a blank template. It has not been installed with a new
 owner’s printer/account/network settings. No configured app bundle or captured
 firmware image is published.
 
-## This update
+## Helper 2.12.0 and device-purpose modules
+
+- Both public ESP32-S3 purpose modules compile with Arduino ESP32 core 3.3.12;
+  the native helper stages and signs locally. No configured binary is committed.
+- Offline checks exercise independent device workers, name/profile controls,
+  stale-selection isolation, application-only installation and recovery backups,
+  ROM/USB identity and partition/checksum refusals, Gym title roundtrips, metric
+  persistence, crank-event wrap/calibration, CPS packet bytes and stop timeout.
+- A real originating Gym installation passed ten-turn cadence calibration and
+  Watch cadence changes/stopping. The Watch subscribed to both CSC and power and
+  displayed zero watts at rest. The owner physically confirmed metric tapping.
+- Physical Desktop→Gym→Desktop switching is not yet qualified. Neither is the
+  heuristic watt estimate calibrated. C6/Nordic purpose switching is unavailable.
+- Existing public default/configuration, source opt-in, astronomy, renderer,
+  transport, privacy and native menu checks remain part of the release suite.
+
+## Earlier Desktop update
 
 - Offline privacy/default-config tests: no selected device, observer location,
   account, printer or enabled source; weather has no default city.

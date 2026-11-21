@@ -1,6 +1,6 @@
 """Independent source workers and immutable latest-value mailboxes.
 
-A source owns data acquisition/encoding. The coordinator alone owns USB.
+A source owns data acquisition/encoding. Each device worker alone owns its connection.
 Slow/failed sources cannot hold another source's fetch worker or erase its cache.
 """
 from __future__ import annotations
@@ -46,7 +46,7 @@ class SourceState:
             if self.source.send_on_publish:self.next_send=0
         if self.source.cache:
             path=self.source.cache;path.parent.mkdir(parents=True,exist_ok=True)
-            temporary=path.with_name(path.name+'.tmp')
+            temporary=path.with_name(path.name+'.'+str(os.getpid())+'.tmp')
             temporary.write_text(json.dumps(data,indent=2)+'\n');temporary.replace(path)
         return True
     def status(self):

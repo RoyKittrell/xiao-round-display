@@ -13,7 +13,7 @@ RX='82a64c01-1e4f-4f34-b9e9-7c0191a0f725'
 TX='82a64c02-1e4f-4f34-b9e9-7c0191a0f725'
 def phase(value):
     print('Bluetooth: '+value,flush=True)
-    root=os.environ.get('XIAO_DISPLAY_DATA_DIR')
+    root=os.environ.get('XIAO_DEVICE_STATE_DIR') or os.environ.get('XIAO_DISPLAY_DATA_DIR')
     if root:
         try:
             path=Path(root)/'bluetooth-status.json';tmp=path.with_suffix('.tmp')
@@ -123,13 +123,35 @@ class BluetoothPort:
     def reset_input_buffer(self):
         with self.session.buffer.condition:self.session.buffer.data.clear()
 
+_selection_guard=None
+
+def set_selection_guard(binding):
+    global _selection_guard
+    _selection_guard=binding
+
+class GuardedPort:
+    def __init__(self,port,binding):self.port=port;self.binding=binding
+    def __enter__(self):self.port.__enter__();return self
+    def __exit__(self,*args):return self.port.__exit__(*args)
+    def write(self,data):self.binding.check();return self.port.write(data)
+    def flush(self):self.binding.check();return self.port.flush()
+    def readline(self):self.binding.check();return self.port.readline()
+    def reset_input_buffer(self):self.binding.check();return self.port.reset_input_buffer()
+
 def open_port(device,*args,**kwargs):
+    binding=_selection_guard
+    if binding:
+        binding.check()
+        if not str(device).startswith(('ble://','wifi://')):binding.verify_usb(device)
+        else:binding.verify_wireless(device)
     if str(device).startswith('wifi://'):
         from wifi_transport import WifiPort
-        return WifiPort(device,*args,**kwargs)
-    if str(device).startswith('ble://'):return BluetoothPort(device,*args,**kwargs)
-    import serial
-    return serial.Serial(device,*args,**kwargs)
+        port=WifiPort(device,*args,**kwargs)
+    elif str(device).startswith('ble://'):port=BluetoothPort(device,*args,**kwargs)
+    else:
+        import serial
+        port=serial.Serial(device,*args,**kwargs)
+    return GuardedPort(port,binding) if binding else port
 
 def connection(root):
     try:
@@ -163,8 +185,8 @@ def selected_usb(settings,fallback):
     # the chosen serial is absent rather than opening that reused path.
     return '/dev/cu.xiao-missing-'+serial_key(wanted)
 
-def endpoint(root,usb_device):
-    settings=connection(root);mode=settings['mode'];identifier=settings.get('bluetooth_id')
+def endpoint(root,usb_device,settings=None):
+    settings=connection(root) if settings is None else settings;mode=settings['mode'];identifier=settings.get('bluetooth_id')
     if mode=='wifi' and settings.get('wifi_host'):
         from wifi_transport import host_from_device
         return 'wifi://'+host_from_device(settings['wifi_host'])
@@ -174,7 +196,7 @@ def endpoint(root,usb_device):
             from wifi_transport import host_from_device
             return 'wifi://'+host_from_device(settings['wifi_host'])
         binding=settings.get('bluetooth_usb_serial')
-        if identifier and (not settings.get('usb_serial') or (binding and serial_key(binding)==serial_key(settings['usb_serial']))):return 'ble://'+identifier
+        if settings.get('bluetooth_for_workout')!='1' and identifier and (not settings.get('usb_serial') or (binding and serial_key(binding)==serial_key(settings['usb_serial']))):return 'ble://'+identifier
     if identifier and mode=='bluetooth':return 'ble://'+identifier
     return usb_device
 

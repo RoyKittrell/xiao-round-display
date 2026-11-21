@@ -2,7 +2,7 @@
 """Install/manage XIAO Display Helper as a named per-user macOS app.
 
 No privileged daemon, firmware changes or credential copying. Run with the
-project's virtual environment after installing requirements.txt.
+project's bundled Python, which has Pillow for the existing Sun updater.
 """
 import argparse
 import json
@@ -67,21 +67,30 @@ def prepare_runtime():
 def build(python_path=None):
  staged=Path(tempfile.mkdtemp(prefix='xiao-helper-build-',dir='/tmp'))/(NAME+'.app');contents=staged/'Contents';macos=contents/'MacOS';macos.mkdir(parents=True,exist_ok=True)
  info={'CFBundleName':NAME,'CFBundleDisplayName':NAME,'CFBundleIdentifier':LABEL,
-       'CFBundleExecutable':NAME,'CFBundlePackageType':'APPL','CFBundleVersion':'20',
-       'CFBundleShortVersionString':'2.7.0','LSUIElement':True,
+       'CFBundleExecutable':NAME,'CFBundlePackageType':'APPL','CFBundleVersion':'27',
+       'CFBundleShortVersionString':'2.12.0','LSUIElement':True,
        'XIAOPythonPath':str(python_path or Path(sys.executable).absolute()),
        'NSBluetoothAlwaysUsageDescription':'Connects to your XIAO Round Display to send scene controls and live information without USB.',
-        'NSLocationUsageDescription':'Uses your location once to save a weather forecast location for your display.',
-       'NSLocationWhenInUseUsageDescription':'Uses your location once for local weather.',
-       'NSLocationTemporaryUsageDescriptionDictionary':{'WeatherLocation':'Saves your weather location once without continuous tracking.'},
+       'NSLocationUsageDescription':'Uses your location once to set the local weather forecast on your XIAO display. The saved location is reused without continuous tracking.',
+       'NSLocationWhenInUseUsageDescription':'Uses your location once to set the local weather forecast on your XIAO display.',
+       'NSLocationTemporaryUsageDescriptionDictionary':{'WeatherLocation':'Uses a precise location once to select the weather forecast for your area, then saves it locally.'},
        'NSLocalNetworkUsageDescription':'Connects to your XIAO display over local Wi-Fi and reads printer status when you enable that source.',
-       'NSHumanReadableCopyright':"XIAO Display — USB display updater"}
+       'NSHumanReadableCopyright':"XIAO Round Display — USB display updater"}
  (contents/'Info.plist').write_bytes(plistlib.dumps(info))
  runtime=contents/'Resources/companion';runtime.mkdir(parents=True,exist_ok=True)
- for filename in ('display_bridge.py','codex_usage.py','sun_bridge.py','bambu_status.py','helper_runtime.py','display_control.py','scenes.json','process_owner.py','runtime_config.py','display_transport.py','hardware_profile.py','weather_status.py','wifi_setup.py','wifi_transport.py','clock-faces.json'):
+ for filename in ('display_bridge.py','codex_usage.py','sun_bridge.py','bambu_status.py','weather_status.py','helper_runtime.py','display_control.py','scenes.json','clock-faces.json','process_owner.py','display_transport.py','wifi_setup.py','wifi_transport.py','hardware_profile.py','device_registry.py','gym_control.py','multi_device.py','device_profiles.py','runtime_config.py'):
   shutil.copyfile(ROOT/'companion'/filename,runtime/filename)
+ profiles=runtime/'device_profiles';profiles.mkdir()
+ shutil.copyfile(ROOT/'device_profiles/catalog.json',profiles/'catalog.json')
+ payload=ROOT/'device_profiles/build'
+ if payload.exists():shutil.copytree(payload,profiles/'build',copy_function=shutil.copyfile)
+ tools=Path.home()/'Library/Arduino15/packages/esp32/tools/esptool_py'
+ candidates=sorted(tools.glob('*/esptool'))
+ if candidates:
+  (profiles/'tools').mkdir();shutil.copy2(candidates[-1],profiles/'tools/esptool')
  shutil.copytree(ROOT/'companion/sources',runtime/'sources',ignore=shutil.ignore_patterns('__pycache__','*.pyc'),copy_function=shutil.copyfile)
- subprocess.run(['/usr/bin/swiftc','-swift-version','5','-module-cache-path','/tmp/xiao-swift-cache','-O',str(ROOT/'companion/menu_bar/MenuBar.swift'),str(ROOT/'companion/menu_bar/Profiles.swift'),str(ROOT/'companion/menu_bar/BluetoothSearch.swift'),str(ROOT/'companion/menu_bar/WeatherLocation.swift'),str(ROOT/'companion/menu_bar/WifiSetup.swift'),'-o',str(macos/NAME),'-framework','AppKit','-framework','CoreLocation','-framework','CoreWLAN'],check=True)
+ (SERVICE/'launcher_paths.h').write_text('#define PYTHON_PATH '+json.dumps(str(Path(sys.executable).absolute()))+'\n#define BRIDGE_PATH '+json.dumps(str(APP/'Contents/Resources/companion/display_bridge.py'))+'\n')
+ subprocess.run(['/usr/bin/swiftc','-swift-version','5','-module-cache-path','/tmp/xiao-swift-cache','-O',str(ROOT/'companion/menu_bar/MenuBar.swift'),str(ROOT/'companion/menu_bar/Profiles.swift'),str(ROOT/'companion/menu_bar/BluetoothSearch.swift'),str(ROOT/'companion/menu_bar/WeatherLocation.swift'),str(ROOT/'companion/menu_bar/WifiSetup.swift'),str(ROOT/'companion/menu_bar/Devices.swift'),str(ROOT/'companion/menu_bar/GymMenu.swift'),'-o',str(macos/NAME),'-framework','AppKit','-framework','CoreLocation','-framework','CoreWLAN'],check=True)
  subprocess.run(['/usr/bin/codesign','--force','--sign','-','--identifier',LABEL,str(staged)],check=True)
  subprocess.run([str(macos/NAME),'--version'],check=True)
  with zipfile.ZipFile(SERVICE/(NAME+'.app.zip'),'w',zipfile.ZIP_DEFLATED) as archive:
@@ -109,7 +118,7 @@ def main():
   build();staged=SERVICE/f'{LABEL}.plist';staged.write_bytes(plistlib.dumps(configuration()));print(staged);return
  if args.action=='install':
   runtime_python=DATA/'python-runtime/bin/python'
-  staged=build(runtime_python) # Finish and validate the replacement before stopping old job.
+  staged=build(runtime_python) # Validate the app before replacing a running runtime.
   prepare_runtime()
   LOGS.mkdir(mode=0o700,parents=True,exist_ok=True);TARGET.parent.mkdir(parents=True,exist_ok=True)
   for folder in ('companion','assets/codex_usage','assets/sun','assets/bambu'):(DATA/folder).mkdir(parents=True,exist_ok=True)
@@ -124,7 +133,7 @@ def main():
   # that are outside the new signature's sealed resource manifest.
   pending=APP.with_name(NAME+'.installing.app');previous=APP.with_name(NAME+'.previous')
   if pending.exists():shutil.rmtree(pending)
-  shutil.copytree(staged,pending,copy_function=shutil.copyfile)
+  shutil.copytree(staged,pending,copy_function=shutil.copy2)
   (pending/'Contents/MacOS'/NAME).chmod(0o755)
   subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict',str(pending)],check=True)
   if previous.exists():shutil.rmtree(previous)

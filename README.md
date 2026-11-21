@@ -1,6 +1,6 @@
 # XIAO Round Display
 
-A customizable desk display for **Seeed Studio XIAO ESP32-S3, ESP32-C6 and
+A modular display platform for **Seeed Studio XIAO ESP32-S3, ESP32-C6 and
 nRF54LM20A Sense** controllers and
 **240 × 240 Seeed Round Display**, with a native **Swift/AppKit macOS menu bar app**.
 
@@ -13,14 +13,33 @@ This is a blank, user-configurable template. It contains the working scene and
 control code, with **no configured device, accounts, printer, location, saved
 profiles, live readings or enabled network feeds**. Integrations are opt-in.
 
-The native helper identifies the connected controller from its running firmware
-and shows the appropriate USB, Bluetooth and Wi-Fi options. The S3 supports
-certificate-pinned encrypted Wi-Fi control; the C6 Wi-Fi build still needs
-hardware qualification. The nRF54 supports USB/Bluetooth and has no Wi-Fi.
-See [hardware and automatic connection settings](docs/HARDWARE.md),
-[Wi-Fi setup](docs/WIFI.md) and [Bluetooth setup](docs/BLUETOOTH.md).
-New rendering code still needs a USB firmware upload; no wireless updater is
-included. The helper does not guess S3 versus C6 from their shared USB IDs.
+Choose a **Desktop** or **Gym Display** device profile. The native macOS helper
+remembers multiple displays, gives each a local name, and updates them independently.
+Selecting a device in the menu changes which controls you see.
+
+**Device → Device Settings…** provides Device Name and a Profile dropdown.
+Changing purpose is an explicit USB firmware installation with identity checks,
+matching partition layout, and a recovery copy of the previous application.
+In-helper purpose switching currently supports ESP32-S3; Desktop source support
+for ESP32-C6 and nRF54LM20A Sense is retained. No firmware OTA updater is included.
+See [device modules and installation](device_profiles/README.md),
+[hardware support](docs/HARDWARE.md), [Wi-Fi](docs/WIFI.md), and
+[Bluetooth](docs/BLUETOOTH.md).
+
+## Gym Display
+
+- Wired contact-switch bike sensor on D2/GPIO3 and GND, with configurable pulses per turn.
+- Cadence and estimated watts calculated on the ESP32, independent of the laptop.
+- Manual resistance levels 1–8, smooth green pulse background and brightness gesture.
+- Tap the large number to switch watts/RPM; customise the title in Device Settings.
+- Standard Bluetooth cycling cadence and power services for Apple Watch workouts.
+- Display-only Demo Mode, persistent pedal logs and saved on-device settings.
+
+**Power is an estimate**, using an adjustable-in-source heuristic rather than a
+calibrated torque measurement. This is standard Bluetooth sensor support, not
+certified Apple GymKit. Check [Gym wiring, model and validation](docs/GYM.md)
+before connecting an existing bike sensor. Never assume a cut cable's colours
+identify its contacts.
 
 ## Scenes
 
@@ -71,8 +90,9 @@ python companion/service/manage.py install
 ```
 
 Compile and flash the firmware using the separate instructions before expecting
-the scene controls to work. Installing the helper does not flash a board.
-The app builds locally with `swiftc`, uses one Python worker, starts at login
+the scene controls to work. Installing the helper does not flash a board. Applying a different device profile
+in Device Settings is a separate, explicit USB installation.
+The app builds locally with `swiftc`, uses one worker per remembered device, starts at login
 through a per-user LaunchAgent and has no Dock icon. There is no prebuilt app
 containing someone else's Python path or system registration.
 

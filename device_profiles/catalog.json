@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "profiles": [
+    {"id": "desktop", "name": "Desktop", "families": ["esp32s3", "esp32c6", "nrf54"], "installer_families": ["esp32s3"], "source": "XiaoPlayground", "description": "Clocks, astronomy, scenes and optional desktop data feeds"},
+    {"id": "gym", "name": "Gym Display", "families": ["esp32s3"], "installer_families": ["esp32s3"], "source": "device_profiles/gym/BikeDashboard", "description": "Bike cadence, estimated power and Apple Watch Bluetooth"}
+  ],
+  "targets": {
+    "esp32s3": {"fqbn": "esp32:esp32:XIAO_ESP32S3:PSRAM=opi,USBMode=hwcdc,CDCOnBoot=default,PartitionScheme=default_8MB,LoopCore=1,EventsCore=0", "chip": "esp32s3"}
+  }
+}

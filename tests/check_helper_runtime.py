@@ -34,7 +34,7 @@ class Runtime(unittest.TestCase):
    cache=Path(tmp)/'latest.json';cache.write_text(json.dumps(quota))
    source=Source('codex','Codex',lambda:None,60,encode=codex_usage.packet,cache=cache)
    reg=Registry([source]);self.assertEqual(reg.states[0].read()[0]['observed_at'],NOW)
-   port=Port();d=bridge.Dispatcher(reg,'fake')
+   port=Port();d=bridge.Dispatcher(reg,'fake');d.hardware.value={'role':'desktop'}
    d.small(port=port);self.assertEqual(len(port.packets),1)
    d.small(port=port);self.assertEqual(len(port.packets),1)
    reg.reconnect();d.small(port=port);self.assertEqual(len(port.packets),2)
@@ -45,7 +45,7 @@ class Runtime(unittest.TestCase):
    for i in range(3):on_progress(port);clock[0]+=6
   reg=Registry([Source('codex','Codex',lambda:quota,60,encode=codex_usage.packet),Source('bambu','Bambu',lambda:printer,1,encode=bambu_status.packet),Source('sun','Sun',lambda:None,900,transfer=transfer)])
   reg.states[0].publish(quota);reg.states[1].publish(printer);reg.states[2].publish(([1],{}))
-  d=bridge.Dispatcher(reg,'fake')
+  d=bridge.Dispatcher(reg,'fake');d.hardware.value={'role':'desktop'}
   with tempfile.TemporaryDirectory() as tmp,patch.object(bridge,'ROOT',Path(tmp)),patch.object(bridge,'usb_lock',lambda:__import__('contextlib').nullcontext()),patch.object(bridge.time,'monotonic',lambda:clock[0]):
    d.images()
   self.assertEqual([p[1:2] for p in port.packets],[b'U',b'M']*3)

@@ -7,7 +7,8 @@ standard ESP32-S3, ESP32-C6 and nRF54LM20A Sense with the GC9A01A Round Display.
 The helper identifies a board once compatible firmware is running; an empty
 controller still needs its first correct USB upload. See [HARDWARE.md](HARDWARE.md)
 for the support matrix and ESP32 Arduino profiles. Never use an S3 binary on a
-C6 or Nordic chip. Upload is explicit; the helper does not flash hardware.
+C6 or Nordic chip. Initial upload is explicit. Later, Device Settings can install a different
+device-purpose profile on a positively identified ESP32-S3 over USB.
 
 The Nordic instructions below apply only to the original nRF54 board. Its
 built-in CMSIS-DAP bridge means no external debugger is needed.
@@ -69,7 +70,33 @@ restart the helper after changing helper settings. Keep their fixed offsets
 matched. DST changes need another explicit update. Location and branding are
 optional; do not commit the local header if it identifies the owner.
 
-## 4. Compile and flash
+## 4. Select a device purpose and compile
+
+Desktop is the existing `XiaoPlayground/` sketch. Gym Display is the separate
+`device_profiles/gym/BikeDashboard/` sketch and currently supports ESP32-S3 only.
+Both are modules of this repository; the helper changes its controls based on
+the firmware that is actually running.
+
+To build both installable S3 packages without touching hardware:
+
+```sh
+python tools/build_device_profiles.py --arduino-cli arduino-cli
+```
+
+This uses the `default_8MB` layout and writes ignored checksum manifests and
+binaries under `device_profiles/build/`. Build these before staging/installing
+the helper if you want its USB profile installer to include both packages. The
+ESP32 Arduino toolchain supplies the USB installer executable. C6/Nordic Desktop
+builds still follow their own hardware instructions; the purpose installer does
+not support those controllers yet.
+
+After an initial supported firmware upload, use Device → Device Settings… to
+name the device and select Desktop or Gym Display. Applying another profile
+requires a USB data cable, matching existing partitions and verified board identity.
+It writes only the application, retaining device preferences and logs. See
+[profile installation](../device_profiles/README.md) and [Gym setup](GYM.md).
+
+### Initial Desktop upload
 
 The required graphics libraries are included in `libraries/`, including the
 project's GC9A01A driver modifications. Retain their notices when distributing.

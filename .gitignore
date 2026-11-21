@@ -54,3 +54,13 @@ display-pairings.json
 weather-location.tmp
 display-*.tmp
 settings.tmp
+
+# Per-device runtime state and generated module packages
+devices/
+device-catalog.json
+device-names.json
+device-connections.json
+gym-actions.json
+gym-status.json
+device-profile.json
+device_profiles/build/
