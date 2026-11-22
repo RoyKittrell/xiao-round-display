@@ -3,9 +3,13 @@ from pathlib import Path
 import re,subprocess,sys,hashlib
 ROOT=Path(__file__).resolve().parents[1]
 EXCLUDED={'.git','.venv','__pycache__','build','dist'}
-# Renderer-generated media reviewed for synthetic data. A replacement must be
-# visually/privacy reviewed before this exact fingerprint is updated.
-REVIEWED_MEDIA={'docs/media/xiao-display-showcase.gif':'dd8205b091c175a74f15963fa1499611f00e75f29931e44443b7374c58e8451f'}
+# Reviewed media: synthetic showcase and the owner's explicitly authorized
+# hardware-demo GIF (no audio/location metadata). Replacements require renewed
+# visual/privacy review before updating their exact fingerprints.
+REVIEWED_MEDIA={
+ 'docs/media/xiao-display-showcase.gif':'dd8205b091c175a74f15963fa1499611f00e75f29931e44443b7374c58e8451f',
+ 'docs/media/gym-xiao-demo.gif':'74e331c8031b7455441043044c079e735e8c7b9bff91f7ba7d78df99774e19a4',
+}
 SYNTHETIC_MACS={'00:11:22:33:44:55','aa:bb:cc:dd:ee:ff'}
 
 def audit(paths, read_bytes=None):
