@@ -331,7 +331,6 @@ void uiDraw() {
       row(136,"WATCH WHEEL","2100 MM");
     }
   }
-  canvas.drawFastHLine(51,142,138,0x21a6);
   uiSmall("RESISTANCE",120,151,UI_GOLD);
   for(int x:{60,180}) {
     bool disabled=(x==60&&resistance==1)||(x==180&&resistance==8);

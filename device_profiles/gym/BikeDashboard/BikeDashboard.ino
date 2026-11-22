@@ -75,7 +75,7 @@ void record(const char *event, uint32_t timestamp, int level, uint32_t interval)
 }
 
 void status() {
-  hostLink.printf("STATUS firmware=bike-dashboard-r21 chip=%012llx pin=D2/GPIO3 level=%d closures=%lu transitions=%lu storage=%s full=%d bytes=%u debounce_us=%lu led_on=%d led_mode=%s wifi_supported=1 ble_supported=1 ble_ready=%d watch_csc=1 watch_power=1 gym_title=1 free_heap=%u max_alloc=%u\n",
+  hostLink.printf("STATUS firmware=bike-dashboard-r22 chip=%012llx pin=D2/GPIO3 level=%d closures=%lu transitions=%lu storage=%s full=%d bytes=%u debounce_us=%lu led_on=%d led_mode=%s wifi_supported=1 ble_supported=1 ble_ready=%d watch_csc=1 watch_power=1 gym_title=1 free_heap=%u max_alloc=%u\n",
     ESP.getEfuseMac(), digitalRead(SENSOR_PIN), (unsigned long)closures,
     (unsigned long)transitions, storageOK ? "OK" : "ERROR", logFull,
     storageOK ? (unsigned)logFile.size() : 0, (unsigned long)DEBOUNCE_US,
