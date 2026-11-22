@@ -75,7 +75,7 @@ void record(const char *event, uint32_t timestamp, int level, uint32_t interval)
 }
 
 void status() {
-  hostLink.printf("STATUS firmware=bike-dashboard-r18 chip=%012llx pin=D2/GPIO3 level=%d closures=%lu transitions=%lu storage=%s full=%d bytes=%u debounce_us=%lu led_on=%d led_mode=%s wifi_supported=1 ble_supported=1 ble_ready=%d watch_csc=1 watch_power=1 gym_title=1 free_heap=%u max_alloc=%u\n",
+  hostLink.printf("STATUS firmware=bike-dashboard-r21 chip=%012llx pin=D2/GPIO3 level=%d closures=%lu transitions=%lu storage=%s full=%d bytes=%u debounce_us=%lu led_on=%d led_mode=%s wifi_supported=1 ble_supported=1 ble_ready=%d watch_csc=1 watch_power=1 gym_title=1 free_heap=%u max_alloc=%u\n",
     ESP.getEfuseMac(), digitalRead(SENSOR_PIN), (unsigned long)closures,
     (unsigned long)transitions, storageOK ? "OK" : "ERROR", logFull,
     storageOK ? (unsigned)logFile.size() : 0, (unsigned long)DEBOUNCE_US,
@@ -114,7 +114,7 @@ void handleCommand() {
   }
   else if (command == "STATUS") {status();
     hostLink.printf("DEMO active=%d pulses=%lu rate=%.1f\n",demoMode,(unsigned long)demoPulses,pulseRate());
-    rideStatus();titleStatus();hostLink.printf("METRIC rpm=%d\n",showRpm);
+    rideStatus();titleStatus();hostLink.printf("METRIC rpm=%d mode=%u\n",mainMetric==1,unsigned(mainMetric));
     hostLink.printf("EDGE green_gradient strength=%u\n",edgeStrength);
     hostLink.printf("GLOW peak=%d centre=%d high_floor=%d\n",glowBrightness,glowCentre,glowHighFloor);
     hostLink.printf("BRIGHTNESS level=%d\n",screenBrightness);
@@ -172,7 +172,9 @@ void setup() {
   if (logFile) logFile.flush();
   sensorQueue=xQueueCreate(128,sizeof(SensorEvent));
   if(sensorQueue) sensorTaskOK=xTaskCreatePinnedToCore(sensorTask,"bike-sensor",3072,nullptr,3,nullptr,0)==pdPASS;
-  uiSetup();hostLink.setResistance(resistance);hostLink.loadRide();
+  // Each boot starts a fresh session. User settings/calibration remain saved;
+  // previous ride snapshots must never be restored into the new ride.
+  uiSetup();hostLink.setResistance(resistance);hostLink.newRide();
   Preferences sensorPrefs;if(sensorPrefs.begin("bike-ui",true)){hostLink.setPulsesPerRevolution(sensorPrefs.getUChar("ppr",1));sensorPrefs.end();}
   uint64_t mac=ESP.getEfuseMac();
   snprintf(Board::BluetoothName,sizeof(Board::BluetoothName),"Gym Xiao-%02X%02X%02X",int((mac>>24)&255),int((mac>>32)&255),int((mac>>40)&255));

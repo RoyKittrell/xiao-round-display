@@ -9,16 +9,18 @@ code=r'''
 #include <cstring>
 #include <cstdint>
 #include <string>
-bool showRpm=false;char displayTitle[25]="BIKE LAB";
-std::string savedTitle;bool savedMetric=false;
+uint8_t mainMetric=0;char displayTitle[25]="BIKE LAB";
+std::string savedTitle;uint8_t savedMetric=0;
 struct Preferences {
  bool begin(const char*,bool){return true;}void end(){}
- void putBool(const char*,bool value){savedMetric=value;}
+ void putUChar(const char*,uint8_t value){savedMetric=value;}
  size_t putString(const char*,const char* value){savedTitle=value;return strlen(value);}
 };
 '''+source[source.index('void toggleMetric()'):source.index('void titleStatus()')]+r'''
 int main(){
- toggleMetric();assert(showRpm&&savedMetric);toggleMetric();assert(!showRpm&&!savedMetric);
+ toggleMetric();assert(mainMetric==1&&savedMetric==1);
+ toggleMetric();assert(mainMetric==2&&savedMetric==2);
+ toggleMetric();assert(mainMetric==0&&savedMetric==0);
  assert(setDisplayTitleHex("42696b65204c6162"));assert(savedTitle=="Bike Lab"&&!strcmp(displayTitle,"Bike Lab"));
  assert(!setDisplayTitleHex("0A"));assert(!setDisplayTitleHex("GG"));assert(!setDisplayTitleHex("2020"));
  assert(!setDisplayTitleHex("4"));assert(!setDisplayTitleHex(""));assert(savedTitle=="Bike Lab");

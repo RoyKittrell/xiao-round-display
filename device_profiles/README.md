@@ -19,7 +19,7 @@ alias that survives disconnection. Profile is Desktop or Gym Display. Saving an
 unchanged profile only saves settings; it does not flash firmware. Editing the
 Gym Display Title sends an acknowledged USB/TLS command and saves it on the board.
 Titles currently accept 1–24 printable ASCII characters (the display's font).
-Tap the large Gym number to swap watts/RPM; this preference is also saved on-board.
+Tap the large Gym number to cycle Watts, RPM and Total Km (or Mi); this preference is saved on-board. Ride totals reset on every startup.
 Demo remains display-only and never generates Watch workout data.
 
 Changing purpose installs a different application over USB. The Mac checks the

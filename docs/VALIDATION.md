@@ -84,3 +84,16 @@ loopback TLS tests, and `python companion/service/manage.py stage` for the nativ
 app build. None authorize querying an owner’s account, pairing a printer or
 flashing a board. New owners should perform the explicit checks in SETUP.md,
 HARDWARE.md and WIFI.md before relying on their own installation.
+
+## Gym r19–r21 update
+
+- ASan/UBSan checks cover wheel-counter reset/wrap, CSC/CPS packet consistency,
+  malformed/unsupported control requests and complete fresh-ride reset.
+- The real metric-cycle function is tested for Watts → RPM → Total Distance →
+  Watts and saved selection; title/protocol checks remain included.
+- Originating r20/r21 builds completed authenticated Wi-Fi installation with
+  running ELF/slot verification. r21 live status showed all ride totals, averages
+  and peaks at zero and retained the existing per-bike distance calibration.
+- The new control point's live response remains unverified because the Mac probe
+  discovered an obsolete cached service layout. Native Watch Indoor Cycle
+  speed/distance summary saving remains unverified. No GymKit claim is made.

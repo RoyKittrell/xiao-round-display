@@ -7,6 +7,9 @@ callbacks=source[source.index('  class ServerCallbacks:'):source.index('  class 
 code=r'''
 #include <cassert>
 #include <cstdint>
+#include <atomic>
+void portENTER_CRITICAL(int*){}
+void portEXIT_CRITICAL(int*){}
 int changed=0,advertised=0;
 void ble_svc_gatt_changed(int,int){++changed;}
 struct ble_gap_conn_desc {uint16_t conn_handle;struct {bool encrypted;bool authenticated;} sec_state;};
@@ -23,6 +26,8 @@ struct BLESecurityCallbacks {
 class HostLink {
 public:
  static HostLink* instance;
+ int controlMux=0;
+ std::atomic<bool> controlSubscribed{false},controlBusy{false},controlPending{false};
  volatile bool connected=false,subscribed=false,powerSubscribed=false,encrypted=false;
  volatile uint16_t connection=0xffff;
  volatile int securityStatus=-1;
@@ -39,8 +44,13 @@ int main(){
  assert(server.disconnected==-1&&changed==0);
  ble_gap_conn_desc other={8,{false,false}};link->onConnect(&server,&other);
  assert(server.disconnected==8&&h.connection==7);
- h.subscribed=true;h.powerSubscribed=true;link->onDisconnect(&server,&watch);
+ h.subscribed=true;h.powerSubscribed=true;
+ h.controlSubscribed=true;h.controlBusy=true;h.controlPending=true;
+ // An unrelated disconnect cannot discard the active peer's request.
+ link->onDisconnect(&server,&other);assert(h.controlPending&&h.connected);
+ link->onDisconnect(&server,&watch);
  assert(!h.connected&&!h.subscribed&&!h.powerSubscribed&&h.connection==0xffff&&advertised==1);
+ assert(!h.controlSubscribed&&!h.controlBusy&&!h.controlPending);
  link->onConnect(&server,&watch);security->onAuthenticationComplete(&watch,0);
  assert(h.connects==2&&h.disconnects==1&&changed==0);
 }

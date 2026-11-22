@@ -55,15 +55,18 @@ to establish cadence after boot/calibration.
 
 ## Controls and connections
 
-Tap the large number to toggle watts/RPM. The other metric remains above it.
+Tap the large number to cycle Watts, RPM and Total Km (Total Mi in imperial units).
+The selection persists. Every startup resets distance, time, work, averages and
+peaks; stopping pedalling retains the current ride. Reset-button and OTA restarts
+also start fresh. Settings/calibration and raw pedal logs are retained.
 Use the on-screen +/- buttons to match the bike's actual resistance setting.
 A right-edge downward drag dims the backlight. The helper's Pulses submenu
 controls the glow separately. Device Settings exposes a saved 1–24 character
 printable ASCII title as well as the Mac-local device name.
 
 The Mac prefers USB, then the paired certificate-pinned Wi-Fi connection.
-Bluetooth on the Gym profile is reserved for the Watch and offers no Mac control
-writes. Wi-Fi settings are provisioned over USB. Neither the laptop nor Wi-Fi
+Bluetooth on the Gym profile is reserved for cycling sensors, including the
+standard wheel-counter control point; it offers no helper/settings control writes. Wi-Fi settings are provisioned over USB. Neither the laptop nor Wi-Fi
 is needed for local sensing, display, calculation or Watch notifications.
 Same-profile updates can use paired Wi-Fi after one USB bootstrap; see
 [OTA.md](../device_profiles/OTA.md). No automatic sleep/wake feature is included.
@@ -73,7 +76,7 @@ Same-profile updates can use paired Wi-Fi after one USB bootstrap; see
 On the originating S3 installation, a counted ten-turn test yielded ten accepted
 closures, Watch cadence followed faster pedalling and returned to zero, and the
 Watch subscribed to the new power characteristic and displayed zero at rest.
-The metric toggle was physically confirmed. The current r18 build also adds
+The metric toggle was physically confirmed. The r18 build added
 [ride totals and virtual wheel data](../device_profiles/gym/RIDE_METRICS.md).
 Distance defaults to a provisional 5 metres per full crank revolution and must
 be calibrated for each bike. Bluetooth wheel circumference is fixed at2100mm;

@@ -11,14 +11,22 @@
 #include "EstimatedPower.h"
 #include "RideStats.h"
 #include "VirtualWheel.h"
+#include "CscControl.h"
+#include <atomic>
 
 // USB/TLS carry controls. Bluetooth exposes only the standard read/notify CSC
-// sensors (real cranks, virtual wheel and estimated power), with normal no-input/no-output bonding and no writable control GATT.
+// sensors (real cranks, virtual wheel and estimated power), plus the standard
+// wheel-counter control point. No writable application/settings control GATT.
 class HostLink:public Stream {
   static HostLink* instance;
   BLEServer* server=nullptr;
   BLECharacteristic* measurement=nullptr;
   BLECharacteristic* powerMeasurement=nullptr;
+  BLECharacteristic* cscControl=nullptr;
+  std::atomic<bool> controlSubscribed{false},controlBusy{false},controlPending{false};
+  portMUX_TYPE controlMux=portMUX_INITIALIZER_UNLOCKED;
+  CscControlRequest controlRequest;
+  uint32_t controlRequests=0,controlApplied=0;
   int resistanceLevel=1;
   uint16_t featureHandle=0;
   CyclingCadence cadence;
@@ -41,6 +49,9 @@ class HostLink:public Stream {
     void onDisconnect(BLEServer*,ble_gap_conn_desc* d)override{
       auto& h=*instance;if(d->conn_handle!=h.connection)return;
       h.connected=h.subscribed=h.powerSubscribed=h.encrypted=false;h.connection=0xffff;++h.disconnects;
+      portENTER_CRITICAL(&h.controlMux);
+      h.controlSubscribed=false;h.controlPending=false;h.controlBusy=false;
+      portEXIT_CRITICAL(&h.controlMux);
       BLEDevice::startAdvertising();
     }
   } serverCallbacks;
@@ -59,6 +70,24 @@ class HostLink:public Stream {
       }
     }
   } measurementCallbacks;
+  class ControlCallbacks:public BLECharacteristicCallbacks {
+    void onSubscribe(BLECharacteristic*,ble_gap_conn_desc* d,uint16_t value)override{
+      if(d&&d->conn_handle==instance->connection)instance->controlSubscribed=(value&2)!=0;
+    }
+    void onWrite(BLECharacteristic* c,ble_gap_conn_desc* d)override{
+      auto& h=*instance;if(!d||d->conn_handle!=h.connection)return;
+      auto value=c->getValue();
+      portENTER_CRITICAL(&h.controlMux);
+      if(h.controlSubscribed&&!h.controlBusy){
+        h.controlBusy=true;h.controlRequest=CscControlRequest::decode((const uint8_t*)value.c_str(),value.length());
+        ++h.controlRequests;h.controlPending=true;
+      }
+      portEXIT_CRITICAL(&h.controlMux);
+    }
+    void onStatus(BLECharacteristic*,Status status,uint32_t)override{
+      if(status!=SUCCESS_NOTIFY)instance->controlBusy=false;
+    }
+  } controlCallbacks;
 public:
   void begin(unsigned long baud){Serial.begin(baud);Serial.setTxTimeoutMs(0);}
   void beginWifi(){wifi.begin();}
@@ -79,6 +108,8 @@ public:
     uint8_t flags[2]={3,0};feature->setValue(flags,2);
     auto location=service->createCharacteristic(BLEUUID(uint16_t(0x2a5d)),BLECharacteristic::PROPERTY_READ);
     uint8_t other=0;location->setValue(&other,1);
+    cscControl=service->createCharacteristic(BLEUUID(uint16_t(0x2a55)),BLECharacteristic::PROPERTY_WRITE|BLECharacteristic::PROPERTY_INDICATE);
+    cscControl->setCallbacks(&controlCallbacks);
     if(!service->start())return false;
     auto powerService=server->createService(BLEUUID(uint16_t(0x1818)));
     powerMeasurement=powerService->createCharacteristic(BLEUUID(uint16_t(0x2a63)),BLECharacteristic::PROPERTY_NOTIFY);
@@ -96,6 +127,22 @@ public:
     started=featureHandle&&featureHandle!=0xffff;return started;
   }
   void serviceBluetooth(){
+    // Handle counter changes on the same task as pedal events. Indications use
+    // NimBLE's asynchronous path so the display/sensor loop never waits for ACK.
+    if(controlPending){
+      uint8_t response[3];bool send=false;uint16_t peer=0xffff;
+      portENTER_CRITICAL(&controlMux);
+      if(controlPending&&connected&&controlSubscribed){
+        controlPending=false;peer=connection;send=true;
+        if(controlRequest.applies()){wheel.setCumulative(controlRequest.value);++controlApplied;}
+        controlRequest.response(response);
+      }else{controlPending=false;controlBusy=false;}
+      portEXIT_CRITICAL(&controlMux);
+      if(send){
+        auto packet=ble_hs_mbuf_from_flat(response,sizeof(response));
+        if(!packet||ble_gatts_indicate_custom(peer,cscControl->getHandle(),packet))controlBusy=false;
+      }
+    }
     rideTotals.tick(esp_timer_get_time());
     bool moving=realCadence()>0;
     if(rideTotals.dirty&&((wasMoving&&!moving)||uint32_t(millis()-rideSavedAt)>=30000))saveRide();
@@ -128,7 +175,6 @@ public:
   void saveRide(){
     Preferences p;if(p.begin("bike-ride",false)){auto data=rideTotals.data();if(p.putBytes("totals",&data,sizeof(data))==sizeof(data)){rideTotals.dirty=false;rideSavedAt=millis();}p.end();}
   }
-  void loadRide(){Preferences p;if(p.begin("bike-ride",true)){RideTotals data;if(p.getBytesLength("totals")==sizeof(data)&&p.getBytes("totals",&data,sizeof(data))==sizeof(data))rideTotals.restore(data);p.end();}}
   void newRide(){rideTotals.reset();saveRide();} // Watch counters remain monotonic.
   bool pairingVisible()const{return false;}
   const char* pairingPIN()const{return "";}
@@ -152,7 +198,8 @@ public:
   void cyclingStatus(){
     print("CSC ready=");print(started);print(" subscribed=");print(subscribed);
     print(" revolutions=");print(cadence.count());print(" event_time=");print(cadence.time());
-    print(" ppr=");print(cadence.calibration());print(" feature_handle=");println(featureHandle);
+    print(" ppr=");print(cadence.calibration());print(" feature_handle=");print(featureHandle);
+    printf(" wheel=%lu control_subscribed=%d control_requests=%lu control_applied=%lu\n",(unsigned long)wheel.count(),int(controlSubscribed.load()),(unsigned long)controlRequests,(unsigned long)controlApplied);
   }
   void powerStatus(){
     printf("POWER estimated=1 watts=%d cadence=%.1f resistance=%d subscribed=%d model=squared-rpm-v1\n",realPower(),realCadence(),resistanceLevel,powerSubscribed);

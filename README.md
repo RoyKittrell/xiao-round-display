@@ -33,10 +33,10 @@ See [device modules and installation](device_profiles/README.md),
 - Wired contact-switch bike sensor on D2/GPIO3 and GND, with configurable pulses per turn.
 - Cadence and estimated watts calculated on the ESP32, independent of the laptop.
 - Manual resistance levels 1–8, smooth green pulse background and brightness gesture.
-- Tap the large number to switch watts/RPM; customise the title in Device Settings.
+- Tap the large number to cycle Watts, RPM and Total Km (or Mi); customise the title in Device Settings.
 - Standard Bluetooth cycling cadence and power services for Apple Watch workouts.
 - Live/Ride/Averages/Peaks pages with estimated speed, distance and mechanical work.
-- Metric/imperial units, editable distance per turn and saved ride totals.
+- Metric/imperial units, editable distance per turn and a fresh ride on every startup.
 - Display-only Demo Mode, persistent pedal logs and saved on-device settings.
 
 **Power is an estimate**, using an adjustable-in-source heuristic rather than a

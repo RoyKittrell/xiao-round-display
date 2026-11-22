@@ -34,7 +34,8 @@ uint32_t milestoneAt=0, lastMilestone=0;
 uint32_t fpsAt=0, fpsFrames=0;
 float uiFps=0;
 int resistance=1;
-bool showRpm=false,imperialUnits=false;int ridePage=0;
+uint8_t mainMetric=0; // Watts, RPM, total distance.
+bool imperialUnits=false;int ridePage=0;
 RideStats demoRide;
 char displayTitle[25]="BIKE LAB";
 bool demoMode=false;
@@ -130,8 +131,8 @@ void rideStatus(){
     imperialUnits?"imperial":"metric",(unsigned long)hostLink.distanceMillimetres(),d.metres,hostLink.realSpeedKph(),(unsigned long long)d.revolutions,d.elapsedUs/1e6,d.movingUs/1e6,d.joules/1000,ride.averageWatts(),ride.averageRpm(),ride.averageKph(),ride.overallWatts(),ride.overallKph(),d.maxWatts,d.maxRpm,d.maxKph);
 }
 void toggleMetric(){
-  showRpm=!showRpm;Preferences p;
-  if(p.begin("bike-ui",false)){p.putBool("show-rpm",showRpm);p.end();}
+  mainMetric=(mainMetric+1)%3;Preferences p;
+  if(p.begin("bike-ui",false)){p.putUChar("main-metric",mainMetric);p.end();}
 }
 bool setDisplayTitleHex(const char* text){
   size_t n=strlen(text);if(n<2||n>48||n%2)return false;
@@ -189,7 +190,9 @@ void uiSetup() {
   Preferences p;
   if(p.begin("bike-ui",true)){
     resistance=constrain(p.getUChar("resistance",1),1,8);
-    showRpm=p.getBool("show-rpm",false);imperialUnits=p.getBool("imperial",false);
+    mainMetric=p.getUChar("main-metric",p.getBool("show-rpm",false)?1:0);
+    if(mainMetric>2)mainMetric=0;
+    imperialUnits=p.getBool("imperial",false);
     hostLink.setDistanceMM(p.getUInt("distance-mm",5000));
     String title=p.getString("title",displayTitle);if(title.length()>=1&&title.length()<=24)title.toCharArray(displayTitle,sizeof(displayTitle));
     glowBrightness=constrain(p.getUChar("glow-peak",25),1,100);
@@ -296,11 +299,11 @@ void uiDraw() {
   const char* speedLabel=imperialUnits?"MPH":"KM/H";const char* distanceLabel=imperialUnits?"MI":"KM";
   char number[32];
   if(ridePage==0){
-    char secondary[32];if(showRpm)snprintf(secondary,sizeof(secondary),"%d EST W",watts);else snprintf(secondary,sizeof(secondary),"%.0f RPM",rpm);
+    char secondary[32];if(mainMetric==1)snprintf(secondary,sizeof(secondary),"%d WATTS",watts);else if(mainMetric==2)snprintf(secondary,sizeof(secondary),"%d W   %.0f RPM",watts,rpm);else snprintf(secondary,sizeof(secondary),"%.0f RPM",rpm);
     uiSmall(secondary,120,64,UI_CYAN);
-    if(showRpm)snprintf(number,sizeof(number),"%.0f",rpm);else snprintf(number,sizeof(number),"%d",watts);
+    if(mainMetric==1)snprintf(number,sizeof(number),"%.0f",rpm);else if(mainMetric==2)snprintf(number,sizeof(number),"%.2f",totals.metres*distanceUnit);else snprintf(number,sizeof(number),"%d",watts);
     uiText(number,120,111,&FreeSansBold24pt7b,UI_WHITE);
-    uiSmall(showRpm?"RPM":"ESTIMATED WATTS",120,118,UI_WHITE);
+    uiSmall(mainMetric==1?"RPM":mainMetric==2?(imperialUnits?"TOTAL MI":"TOTAL KM"):"WATTS",120,118,UI_WHITE);
     snprintf(number,sizeof(number),"%.1f %s   %.3f %s",speed*speedUnit,speedLabel,totals.metres*distanceUnit,distanceLabel);
     uiSmall(number,120,133,UI_CYAN);
   }else{
@@ -338,7 +341,7 @@ void uiDraw() {
   }
   snprintf(number,sizeof(number),"%d",resistance);
   uiText(number,120,187,&FreeSansBold18pt7b,UI_GOLD);
-  uiSmall("SPEED / DIST / POWER EST",120,207,UI_MUTED);
+  uiSmall("SPEED / DIST / WATTS",120,207,UI_MUTED);
   const char* pages[]={"LIVE  >","RIDE  >","AVERAGES  >","PEAKS  >"};uiSmall(pages[ridePage],120,221,UI_CYAN);
   if(ridePage==0&&!demoMode&&milestoneAt&&now-milestoneAt<1400) {
     canvas.fillRoundRect(29,76,182,55,12,0x1146);
