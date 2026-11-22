@@ -22,8 +22,15 @@ class Profiles(unittest.TestCase):
    Path(args[-1]).write_bytes(data)
   return 'Hash of data verified.'
  def install(self,probes=None):
-  with patch.object(d,'port_for',return_value='/dev/cu.synthetic'),patch.object(d,'probe',side_effect=probes or [{'identified':True,'family':'esp32s3','role':'desktop'},{'identified':True,'family':'esp32s3','role':'gym'}]),patch.object(d,'run_tool',side_effect=self.rom):
+  with patch.object(d,'port_for',return_value='/dev/cu.synthetic'),patch.object(d,'probe',side_effect=probes or [{'identified':True,'family':'esp32s3','role':'desktop'},{'identified':True,'family':'esp32s3','role':'gym'}]),patch.object(d,'run_tool',side_effect=self.rom),patch.object(d,'read_application',side_effect=lambda tool,serial,offset,path:path.write_bytes(b'old application')):
    return d.install(self.id,'gym',self.root,self.package)
+ def test_recovery_reads_are_bounded_and_exact(self):
+  calls=[]
+  def read(tool,serial,args,reset='no-reset'):
+   calls.append(args);Path(args[-1]).write_bytes(b'x'*int(args[2],0))
+  with patch.object(d,'run_tool',side_effect=read),patch.object(d.time,'sleep'):d.read_application('tool','001122334455','0x340000',self.root/'backup.bin')
+  self.assertEqual((self.root/'backup.bin').stat().st_size,0x330000)
+  self.assertTrue(all(int(a[2],0)<=0x20000 for a in calls));self.assertEqual(calls[0][1],'0x340000')
  def test_valid_application_only_install_and_recovery(self):
   peer=device_root(self.root,'usb:aabbccddeeff');peer.mkdir(parents=True);(peer/'settings').write_text('unchanged')
   out=self.install();self.assertTrue(out['verified'])
@@ -31,6 +38,9 @@ class Profiles(unittest.TestCase):
   backup=list(device_root(self.root,self.id).glob('private/profile-recovery/*/application.bin'));self.assertEqual(backup[0].read_bytes(),b'old application')
   self.assertEqual((peer/'settings').read_text(),'unchanged')
   self.assertEqual(json.loads((device_root(self.root,self.id)/'device-profile.json').read_text())['profile'],'gym')
+ def test_usb_install_targets_the_running_ota_slot(self):
+  self.install([{'identified':True,'family':'esp32s3','role':'desktop','ota_address':0x340000},{'identified':True,'family':'esp32s3','role':'gym'}])
+  write=next(a for a,r in self.calls if a[0]=='write-flash');self.assertEqual(write[1],'0x340000')
  def test_wrong_mac_never_writes_and_restores_boot(self):
   self.mac='aa:bb:cc:dd:ee:ff'
   with self.assertRaisesRegex(ValueError,'ROM MAC'):self.install()

@@ -16,9 +16,29 @@ harness=r'''
   assert(object(delegate.deviceDataRoot.appendingPathComponent("namespace-fixture.json"))["id"] as? String==gym)
   delegate.rebuild()
   assert(delegate.menu.items[0].title.hasPrefix("Device: "))
+  let firmwareMenu=delegate.menu.items.first{$0.title=="Firmware"}!.submenu!
+  assert(!firmwareMenu.items.first{$0.title=="Update Firmware over Wi-Fi…"}!.isEnabled)
+
   let deviceMenu=delegate.menu.items[0].submenu!
   assert(deviceMenu.items.contains{$0.title=="Device Settings…"})
   assert(!deviceMenu.items.contains{$0.title.contains("Rename")})
+  var capable=delegate.hardware;capable["ota_supported"]=true;delegate.health["hardware"]=capable
+  delegate.connectionSettings["wifi_host"]="xiao-display-334455.local";delegate.rebuild()
+  assert(delegate.menu.items.first{$0.title=="Firmware"}!.submenu!.items.first{$0.title=="Update Firmware over Wi-Fi…"}!.isEnabled)
+  delegate.gymState["units"]="metric";delegate.gymState["distance_mm"]=5000;delegate.gymState["ride"]=["distance_m":500.0,"work_kj":2.5];delegate.rebuild()
+  let rideMenu=delegate.menu.items.first{$0.title=="Ride Data"}!.submenu!
+  assert(rideMenu.items.first{$0.title=="Kilometres · km/h"}!.state == .on)
+  assert(rideMenu.items.first{$0.title=="Start New Ride…"}!.isEnabled)
+  assert(rideMenu.items[0].title.contains("0.500"))
+  let originalHealth=delegate.health
+  for family in ["esp32c6","nrf54"] {
+    var manual=delegate.hardware;manual["family"]=family;delegate.health["hardware"]=manual
+    delegate.rebuild()
+    let items=delegate.menu.items.first{$0.title=="Firmware"}!.submenu!.items
+    assert(items.allSatisfy{!$0.isEnabled})
+    assert(!items.contains{$0.title=="Update Firmware over Wi-Fi…"})
+  }
+  delegate.health=originalHealth;delegate.rebuild()
   let (settingsView,nameField,profilePicker)=delegate.deviceSettingsView()
   let titleField=settingsView.viewWithTag(501) as! NSTextField
   assert(titleField.isEnabled && titleField.stringValue=="Bike Lab")

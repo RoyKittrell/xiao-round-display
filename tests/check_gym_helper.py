@@ -15,19 +15,22 @@ def settings(root,serial=SERIAL,epoch='one'):
  v={'mode':'usb','usb_serial':serial,'usb_device':'/dev/cu.synthetic','device_id':'usb:'+serial,'selection_epoch':epoch}
  atomic(root/'display-connection.json',v);return v
 class Port:
- def __init__(self):self.sent=[];self.lines=[];self.glow={'peak':32,'centre':29,'high_floor':68};self.brightness=77;self.demo=True;self.on_ui=None;self.title=None
+ def __init__(self):self.sent=[];self.lines=[];self.glow={'peak':32,'centre':29,'high_floor':68};self.brightness=77;self.demo=True;self.on_ui=None;self.title=None;self.units=None;self.distance_mm=5000
  def __enter__(self):return self
  def __exit__(self,*a):pass
  def reset_input_buffer(self):pass
  def flush(self):pass
  def status(self):
-  return ([b'TITLE hex='+self.title.encode('ascii').hex().encode()+b'\n'] if self.title is not None else [])+[b'CLOSE,1234,0,1,100\n',b'STATUS firmware=bike-dashboard-r10 chip=554433221100 storage=OK\n',f'DEMO active={int(self.demo)} pulses=10 rate=75.0\n'.encode(),f'GLOW peak={self.glow["peak"]} centre={self.glow["centre"]} high_floor={self.glow["high_floor"]}\n'.encode(),f'BRIGHTNESS level={self.brightness}\n'.encode(),b'UI ready=1 resistance=4 touch_ok=1\n']
+  return ([f'RIDE units={self.units} mm_per_rev={self.distance_mm} distance_m=50.0 speed_kph=18.0 elapsed_s=10.0 moving_s=9.0 work_kj=0.25 avg_w=28.0 max_rpm=60.0\n'.encode()] if self.units else [])+([b'TITLE hex='+self.title.encode('ascii').hex().encode()+b'\n'] if self.title is not None else [])+[b'CLOSE,1234,0,1,100\n',b'STATUS firmware=bike-dashboard-r10 chip=554433221100 storage=OK\n',f'DEMO active={int(self.demo)} pulses=10 rate=75.0\n'.encode(),f'GLOW peak={self.glow["peak"]} centre={self.glow["centre"]} high_floor={self.glow["high_floor"]}\n'.encode(),f'BRIGHTNESS level={self.brightness}\n'.encode(),b'UI ready=1 resistance=4 touch_ok=1\n']
  def write(self,data):
   self.sent.append(data)
   if data==b'STATUS\n':self.lines+=self.status()
   elif data==b'?\n':self.lines.append(b'Commands: STATUS, DEMO\n')
   elif data.startswith(b'GLOW '):
    a,b,c=map(int,data.split()[1:]);self.glow={'peak':a,'centre':b,'high_floor':c};self.lines.append(f'GLOW peak={a} centre={b} high_floor={c}\n'.encode())
+  elif data.startswith(b'UNITS '):self.units=data.decode().split()[1].lower();self.lines.append(b'UNITS saved\n')
+  elif data.startswith(b'DISTANCE_MM '):self.distance_mm=int(data.split()[1]);self.lines.append(b'DISTANCE_MM saved\n')
+  elif data==b'NEW RIDE\n':self.lines.append(b'NEW RIDE saved\n')
   elif data.startswith(b'TITLE '):self.title=bytes.fromhex(data.decode().split()[1]).decode('ascii');self.lines.append(data)
   elif data.startswith(b'BRIGHTNESS '):self.brightness=int(data.split()[1]);self.lines.append(f'BRIGHTNESS level={self.brightness}\n'.encode())
   elif data in (b'DEMO ON\n',b'DEMO OFF\n'):self.demo=data==b'DEMO ON\n';self.lines.append(data.strip()+b': display only\n')
@@ -37,6 +40,16 @@ class Port:
   if line.startswith(b'UI ') and self.on_ui:self.on_ui();self.on_ui=None
   return line
 class GymTests(unittest.TestCase):
+ def test_ride_units_and_calibration_roundtrip(self):
+  with tempfile.TemporaryDirectory() as tmp:
+   root=Path(tmp);settings(root);g=GymControl(root);p=Port();p.units='metric'
+   atomic(root/'gym-actions.json',{ID:{'token':'ride','target':ID,'selection':'one','values':{'units':'imperial','distance_mm':6250}}})
+   g.consumed={};g.service(p,Selection(root));self.assertEqual(g.value['units'],'imperial');self.assertEqual(g.value['distance_mm'],6250);self.assertEqual(g.value['ride']['distance_m'],50)
+ def test_ride_command_bounds_and_explicit_reset(self):
+  self.assertEqual(commands({'units':'metric','distance_mm':5000,'new_ride':True}),[b'UNITS METRIC\n',b'DISTANCE_MM 5000\n',b'NEW RIDE\n'])
+  for action in ({'units':'other'},{'distance_mm':0},{'distance_mm':True},{'distance_mm':100001},{'new_ride':False}):
+   with self.assertRaises(ValueError):commands(action)
+
  def test_title_action_roundtrip_changes_only_title(self):
   with tempfile.TemporaryDirectory() as tmp:
    root=Path(tmp);settings(root);g=GymControl(root);p=Port();p.title="Bike Lab"

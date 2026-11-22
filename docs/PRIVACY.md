@@ -13,6 +13,7 @@ Local state is in `~/Library/Application Support/XIAO Display Helper/`:
 | display-profiles.json | Named settings snapshots |
 | device-catalog.json, device-connections.json, device-names.json | Remembered boards, per-device connection choices and local aliases |
 | devices/ | Per-device preferences, telemetry, operational logs and private firmware recovery copies |
+| firmware-maintenance.json, device-profile.json | Local update coordination and verification state |
 | gym-actions.json, gym-status.json | Targeted Gym settings requests and acknowledged values |
 | display-connection.json | Locally chosen transport and macOS Bluetooth device UUID |
 | bluetooth-status.json | Local discovery/connection phase |
@@ -67,3 +68,10 @@ device NVS holds the Wi-Fi credentials/private key; this does not imply physical
 flash extraction protection. Pairing material under local private/wifi and
 configured NVS/flash dumps must never be published. Hardware, Wi-Fi-setup and
 weather-location state are ignored by Git and covered by the privacy audit.
+
+S3 firmware updates reuse the selected display's pinned certificate and controller
+token on TLS port7444. Update packets contain the compiled application and
+integrity metadata, not account credentials. The updater changes only the
+inactive application slot; NVS and the filesystem are preserved. Local recovery
+images, ride snapshots and raw pedal logs remain private runtime artifacts and
+must not be committed or distributed.

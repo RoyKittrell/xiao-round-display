@@ -2,7 +2,7 @@
 
 | Controller | USB | Bluetooth LE | Wi-Fi | Validation |
 |---|---|---|---|---|
-| XIAO ESP32-S3 (standard, 8 MB flash/8 MB PSRAM) | Yes | Implemented | TLS LAN control/data | S3 originating hardware: Wi-Fi, all ten scenes, full Sun CRC, touch and ~30 FPS clock verified |
+| XIAO ESP32-S3 (standard, 8 MB flash/8 MB PSRAM) | Yes | Implemented | TLS LAN control/data; same-profile OTA | S3 originating hardware: Wi-Fi, all ten scenes, full Sun CRC, touch and ~30 FPS clock verified |
 | XIAO ESP32-C6 (4 MB flash, no PSRAM) | Yes | Yes | Implemented; experimental | USB/BLE controls previously checked; Wi-Fi/TLS memory/performance needs mounted C6 QC |
 | XIAO nRF54LM20A Sense | Yes | Yes | No radio | Original scene/USB/BLE checks; final public Bluetooth reconnection still needs owner verification |
 
@@ -65,5 +65,6 @@ power switch ON. Turn KE switch2 ON for real backlight dimming.
 
 ESP32 USB-host detection cannot reliably distinguish a wall charger from battery
 power. Unknown power stays awake; do not promise charger-only sleep detection.
-The Nordic PMIC power-detection path remains separate. Firmware uploads remain
-USB; wireless scene/data transport does not install new compiled renderers.
+The Nordic PMIC power-detection path remains separate. First installation and purpose changes require USB. OTA-capable S3 builds can
+install a newly compiled, locally bundled same-profile build over paired TLS
+Wi-Fi; C6/Nordic firmware updates remain USB. See [OTA.md](../device_profiles/OTA.md).

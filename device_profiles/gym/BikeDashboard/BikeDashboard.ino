@@ -75,7 +75,7 @@ void record(const char *event, uint32_t timestamp, int level, uint32_t interval)
 }
 
 void status() {
-  hostLink.printf("STATUS firmware=bike-dashboard-r16 chip=%012llx pin=D2/GPIO3 level=%d closures=%lu transitions=%lu storage=%s full=%d bytes=%u debounce_us=%lu led_on=%d led_mode=%s wifi_supported=1 ble_supported=1 ble_ready=%d watch_csc=1 watch_power=1 gym_title=1 free_heap=%u max_alloc=%u\n",
+  hostLink.printf("STATUS firmware=bike-dashboard-r18 chip=%012llx pin=D2/GPIO3 level=%d closures=%lu transitions=%lu storage=%s full=%d bytes=%u debounce_us=%lu led_on=%d led_mode=%s wifi_supported=1 ble_supported=1 ble_ready=%d watch_csc=1 watch_power=1 gym_title=1 free_heap=%u max_alloc=%u\n",
     ESP.getEfuseMac(), digitalRead(SENSOR_PIN), (unsigned long)closures,
     (unsigned long)transitions, storageOK ? "OK" : "ERROR", logFull,
     storageOK ? (unsigned)logFile.size() : 0, (unsigned long)DEBOUNCE_US,
@@ -92,6 +92,12 @@ void handleCommand() {
   else if(command.startsWith("TITLE ")) {
     if(setDisplayTitleHex(command.c_str()+6))titleStatus();else hostLink.println("ERROR invalid title; use 1..24 printable ASCII characters as hex");
   }
+  else if(command.startsWith("PAGE ")){int page=-1;if(sscanf(command.c_str(),"PAGE %d",&page)==1&&page>=0&&page<4){ridePage=page;hostLink.printf("PAGE value=%d\n",page);}else hostLink.println("ERROR PAGE must be 0..3");}
+  else if(command=="UNITS METRIC"||command=="UNITS IMPERIAL") {setUnits(command.endsWith("IMPERIAL"));hostLink.printf("UNITS value=%s\n",imperialUnits?"imperial":"metric");}
+  else if(command.startsWith("DISTANCE_MM ")) {
+    unsigned long mm=0;if(sscanf(command.c_str(),"DISTANCE_MM %lu",&mm)==1&&mm>=100&&mm<=100000){hostLink.setDistanceMM(mm);Preferences p;if(p.begin("bike-ui",false)){p.putUInt("distance-mm",mm);p.end();}hostLink.printf("DISTANCE_MM value=%lu\n",mm);}else hostLink.println("ERROR distance must be 100..100000 mm per turn");
+  }
+  else if(command=="NEW RIDE") {hostLink.newRide();record("NEW_RIDE",micros(),digitalRead(SENSOR_PIN),0);hostLink.println("NEW RIDE saved");}
   else if(command.startsWith("PPR ")) {
     int n;if(sscanf(command.c_str(),"PPR %d",&n)==1&&n>=1&&n<=16){
       hostLink.setPulsesPerRevolution(n);Preferences p;
@@ -108,7 +114,7 @@ void handleCommand() {
   }
   else if (command == "STATUS") {status();
     hostLink.printf("DEMO active=%d pulses=%lu rate=%.1f\n",demoMode,(unsigned long)demoPulses,pulseRate());
-    titleStatus();hostLink.printf("METRIC rpm=%d\n",showRpm);
+    rideStatus();titleStatus();hostLink.printf("METRIC rpm=%d\n",showRpm);
     hostLink.printf("EDGE green_gradient strength=%u\n",edgeStrength);
     hostLink.printf("GLOW peak=%d centre=%d high_floor=%d\n",glowBrightness,glowCentre,glowHighFloor);
     hostLink.printf("BRIGHTNESS level=%d\n",screenBrightness);
@@ -148,6 +154,7 @@ void handleCommand() {
 
 void setup() {
   hostLink.begin(115200);
+  WifiOta::beforeRestart=[](){if(logFile)logFile.flush();hostLink.saveRide();};
   digitalWrite(LED_BUILTIN, HIGH);
   pinMode(LED_BUILTIN, OUTPUT);
   command.reserve(40);
@@ -165,7 +172,7 @@ void setup() {
   if (logFile) logFile.flush();
   sensorQueue=xQueueCreate(128,sizeof(SensorEvent));
   if(sensorQueue) sensorTaskOK=xTaskCreatePinnedToCore(sensorTask,"bike-sensor",3072,nullptr,3,nullptr,0)==pdPASS;
-  uiSetup();hostLink.setResistance(resistance);
+  uiSetup();hostLink.setResistance(resistance);hostLink.loadRide();
   Preferences sensorPrefs;if(sensorPrefs.begin("bike-ui",true)){hostLink.setPulsesPerRevolution(sensorPrefs.getUChar("ppr",1));sensorPrefs.end();}
   uint64_t mac=ESP.getEfuseMac();
   snprintf(Board::BluetoothName,sizeof(Board::BluetoothName),"Gym Xiao-%02X%02X%02X",int((mac>>24)&255),int((mac>>32)&255),int((mac>>40)&255));
@@ -224,6 +231,7 @@ void loop() {
     if (storageOK) logFile.flush();
     lastFlush = millis();
   }
+  if(WifiOta::rebootDue()&&logFile)logFile.flush();
   wirelessCommands();
   touchService();
   demoService();

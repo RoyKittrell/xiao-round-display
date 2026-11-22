@@ -17,8 +17,11 @@ installation; a new owner must verify their own network and panel.
    It can now be powered by a USB charger; the helper must stay running on the
    same reachable LAN for the Mac-mediated Codex/printer/weather/Sun updates.
 
-No router port forwarding, cloud relay, open access point or firmware OTA
-service is added. USB remains the recovery/configuration path. To change the
+No router port forwarding, cloud relay or open access point is added. S3 builds
+include a separately authenticated TLS firmware-update receiver on port7444;
+see [OTA.md](../device_profiles/OTA.md) for initial USB setup and limits.
+C6 Wi-Fi controls do not enable firmware OTA. USB remains the recovery and
+configuration path. To change the
 network, select USB and repeat setup. Settings/profiles/scenes are preserved.
 
 ## Connection and privacy

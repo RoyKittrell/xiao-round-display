@@ -21,7 +21,9 @@ Selecting a device in the menu changes which controls you see.
 Changing purpose is an explicit USB firmware installation with identity checks,
 matching partition layout, and a recovery copy of the previous application.
 In-helper purpose switching currently supports ESP32-S3; Desktop source support
-for ESP32-C6 and nRF54LM20A Sense is retained. No firmware OTA updater is included.
+for ESP32-C6 and nRF54LM20A Sense is retained. **ESP32-S3 firmware updates can
+use paired, encrypted Wi-Fi after an initial USB installation.** C6/Nordic updates
+remain USB. See [firmware updates](device_profiles/OTA.md).
 See [device modules and installation](device_profiles/README.md),
 [hardware support](docs/HARDWARE.md), [Wi-Fi](docs/WIFI.md), and
 [Bluetooth](docs/BLUETOOTH.md).
@@ -33,6 +35,8 @@ See [device modules and installation](device_profiles/README.md),
 - Manual resistance levels 1–8, smooth green pulse background and brightness gesture.
 - Tap the large number to switch watts/RPM; customise the title in Device Settings.
 - Standard Bluetooth cycling cadence and power services for Apple Watch workouts.
+- Live/Ride/Averages/Peaks pages with estimated speed, distance and mechanical work.
+- Metric/imperial units, editable distance per turn and saved ride totals.
 - Display-only Demo Mode, persistent pedal logs and saved on-device settings.
 
 **Power is an estimate**, using an adjustable-in-source heuristic rather than a

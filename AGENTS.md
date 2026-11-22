@@ -39,5 +39,8 @@ firmware stays unidentified; do not infer ESP32-S3/C6 from their shared USB IDs.
 Preserve endpoint/serial scoping so auto mode cannot select another display’s
 old wireless pairing. Wi-Fi credentials are entered only through the native
 secure field over USB; keep generated device keys, controller tokens, pins and
-location/network diagnostic files out of Git. No firmware OTA service exists.
+location/network diagnostic files out of Git. S3 same-profile firmware updates use
+the paired certificate-pinned TLS OTA receiver; never expose an unauthenticated
+updater, silently flash, erase NVS or change partitions. C6/Nordic OTA is disabled.
+See device_profiles/OTA.md for bootstrap, verification and recovery limits.
 See docs/HARDWARE.md and docs/WIFI.md for build and verification limits.

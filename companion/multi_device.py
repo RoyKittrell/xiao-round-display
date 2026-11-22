@@ -113,3 +113,12 @@ def run(base,script):
                     if value:atomic(base/name,value)
             time.sleep(.5)
     finally:coordinator.close()
+
+
+def maintenance_active(target):
+    value=read(Path(target)/'firmware-maintenance.json')
+    try:
+        until=float(value['until']);pid=int(value['pid'])
+        if pid<=0 or not time.time()<until<time.time()+360:return False
+        os.kill(pid,0);return True
+    except (OSError,ValueError,TypeError,KeyError):return False

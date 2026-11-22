@@ -61,7 +61,7 @@ TouchCoordinates touchCoordinates;
 TouchCalibration touchCalibration;
 DisplayBusHealth displayBus;
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
-const char* firmwareTag="esp32s3-public-r34-wifi";
+const char* firmwareTag="esp32s3-public-r35-wifi-ota";
 #elif defined(ARDUINO_ARCH_ESP32)
 const char* firmwareTag="esp32c6-public-r34-wifi";
 #else

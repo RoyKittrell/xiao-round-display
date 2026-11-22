@@ -158,6 +158,11 @@ def main():
         connected=False;health_due=0;binding=None;gym=GymControl(workroot,ROOT);sources_started=False;profile_stamp=None
         try:
             while True:
+                from multi_device import maintenance_active
+                if maintenance_active(workroot):
+                    from wifi_transport import close_wifi
+                    close_wifi();close_bluetooth();registry.connected.clear();connected=False
+                    time.sleep(.15);continue
                 check_owner();current=Selection(ROOT,args.serve_device);selected=endpoint(ROOT,args.device,settings=current.settings)
                 if binding is None or binding.key!=current.key or dispatcher.device!=selected:
                     close_bluetooth();binding=current;set_selection_guard(binding)

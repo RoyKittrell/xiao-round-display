@@ -40,7 +40,7 @@ def probe(port):
     import serial
     from hardware_profile import identify
     with serial.Serial(port,115200,timeout=.15,write_timeout=3) as s:
-        time.sleep(.25);s.reset_input_buffer();s.write(b'?\nSTATUS\n');lines=[];end=time.monotonic()+4
+        time.sleep(.25);s.reset_input_buffer();s.write(b'?\n');lines=[];end=time.monotonic()+4
         while time.monotonic()<end:
             line=s.readline().decode('ascii',errors='replace').strip()
             if line:lines.append(line[:500])
@@ -52,13 +52,37 @@ def check_partitions(expected,actual):
     if len(expected)<32 or len(actual)<len(expected) or actual[:len(expected)]!=expected:raise ValueError('The current partition layout differs. No firmware was written; a reviewed USB migration is needed.')
 
 def run_tool(tool,serial,args,reset='no-reset'):
-    port=port_for(serial) # Recheck USB identity before every ROM command.
+    deadline=time.monotonic()+8
+    while True:
+        try:port=port_for(serial);break # Recheck USB identity before every ROM command.
+        except ValueError:
+            if time.monotonic()>deadline:raise
+            time.sleep(.1)
     command=[str(tool),'--chip','esp32s3','--port',port,'--baud','921600','--after',reset,*args]
     result=subprocess.run(command,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=180)
-    if result.returncode:raise RuntimeError('USB firmware operation failed. Reconnect USB and retry; recovery files were retained.')
+    if result.returncode and args[0]=='read-flash':
+        # Some native-USB/stub reads fail at particular image byte patterns.
+        # The ROM slow reader is independent of that streaming stub path.
+        command=[str(tool),'--chip','esp32s3','--port',port_for(serial),'--baud','115200','--no-stub','--after',reset,*args]
+        result=subprocess.run(command,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=180)
+    if result.returncode:raise RuntimeError('USB firmware operation failed: '+result.stdout[-1200:])
     return result.stdout
 
-def install(identifier,profile,root=ROOT,package=PACKAGE):
+def read_application(tool,serial,offset,destination):
+    # Native USB can drop long streaming reads. Bound each ROM transfer and
+    # assemble an exact-size recovery file before any firmware write.
+    destination=Path(destination);partial=destination.with_suffix('.partial')
+    with partial.open('wb') as out:
+        for relative in range(0,0x330000,0x20000):
+            length=min(0x20000,0x330000-relative);chunk=destination.with_suffix('.chunk')
+            run_tool(tool,serial,['read-flash',hex(int(offset,0)+relative),hex(length),str(chunk)],reset='hard-reset')
+            time.sleep(.5)
+            data=chunk.read_bytes()
+            if len(data)!=length:raise OSError('Incomplete USB recovery chunk; firmware was not written')
+            out.write(data);chunk.unlink()
+    partial.replace(destination)
+
+def install(identifier,profile,root=ROOT,package=PACKAGE,force=False):
     if not re.fullmatch(r'usb:[0-9a-f]{12}',identifier):raise ValueError('Choose a positively identified USB XIAO first.')
     serial=identifier[4:];root=Path(root);target=device_root(root,identifier);folder=module(profile,'esp32s3',package)
     tool=Path(package)/'tools/esptool'
@@ -73,7 +97,9 @@ def install(identifier,profile,root=ROOT,package=PACKAGE):
                 time.sleep(.1)
         current=probe(port_for(serial))
         if not current['identified'] or current['family']!='esp32s3':raise ValueError('The running firmware must positively identify a supported ESP32-S3.')
-        if current['role']==profile:return {'profile':profile,'changed':False,'verified':True}
+        if current['role']==profile and not force:return {'profile':profile,'changed':False,'verified':True}
+        offset=hex(current.get('ota_address',65536))
+        if offset not in ('0x10000','0x340000'):raise ValueError('Unsupported running application slot')
         backup=target/'private/profile-recovery'/str(time.time_ns());backup.mkdir(parents=True,mode=0o700)
         atomic(backup/'before.json',{'device':identifier,'hardware':current,'requested_profile':profile})
         try:
@@ -82,9 +108,9 @@ def install(identifier,profile,root=ROOT,package=PACKAGE):
             if serial not in [m.lower().replace(':','') for m in macs]:raise ValueError('ROM MAC does not match the selected XIAO. No firmware was written.')
             run_tool(tool,serial,['read-flash','0x8000','0x1000',str(backup/'partitions.bin')])
             check_partitions((folder/'partitions.bin').read_bytes(),(backup/'partitions.bin').read_bytes())
-            run_tool(tool,serial,['read-flash','0x10000','0x330000',str(backup/'application.bin')])
+            read_application(tool,serial,offset,backup/'application.bin')
             # Application-only write. NVS, logs, preferences and partition table remain.
-            output=run_tool(tool,serial,['write-flash','0x10000',str(folder/'application.bin')],reset='hard-reset')
+            output=run_tool(tool,serial,['write-flash',offset,str(folder/'application.bin')],reset='hard-reset')
             (backup/'upload.log').write_text(output)
             end=time.monotonic()+18;observed={}
             while time.monotonic()<end:
@@ -104,8 +130,8 @@ def install(identifier,profile,root=ROOT,package=PACKAGE):
 
 def main():
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--device',required=True);parser.add_argument('--profile',required=True,choices=['desktop','gym'])
-    args=parser.parse_args()
-    try:result=install(args.device,args.profile)
+    parser.add_argument('--force',action='store_true');args=parser.parse_args()
+    try:result=install(args.device,args.profile,force=args.force)
     except Exception as error:result={'error':str(error)}
     print(json.dumps(result))
 if __name__=='__main__':main()

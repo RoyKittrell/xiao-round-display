@@ -15,6 +15,20 @@ def parse_status(lines):
                 try:value[name]=int(f[name])
                 except (ValueError,KeyError):pass
             if f.get('storage') in ('OK','ERROR'):value['storage']=f['storage']
+        elif line.startswith('RIDE '):
+            f=fields(line)
+            if f.get('units') in ('metric','imperial'):value['units']=f['units']
+            try:
+                mm=int(f['mm_per_rev'])
+                if 100<=mm<=100000:value['distance_mm']=mm
+            except (KeyError,ValueError):pass
+            ride={}
+            for key in ('distance_m','speed_kph','revolutions','elapsed_s','moving_s','work_kj','avg_w','avg_rpm','avg_kph','overall_w','overall_kph','max_w','max_rpm','max_kph'):
+                try:
+                    number=float(f[key])
+                    if math.isfinite(number) and number>=0:ride[key]=number
+                except (KeyError,ValueError):pass
+            value['ride']=ride
         elif line.startswith('TITLE hex='):
             try:
                 title=bytes.fromhex(fields(line)['hex']).decode('ascii')
@@ -76,8 +90,18 @@ def valid_title(value):
     return isinstance(value,str) and 1<=len(value)<=24 and bool(value.strip()) and all(32<=ord(c)<=126 for c in value)
 
 def commands(value):
-    if not isinstance(value,dict) or set(value)-{'glow','brightness','demo','title'}:raise ValueError('Unsupported Gym action')
+    if not isinstance(value,dict) or set(value)-{'glow','brightness','demo','title','units','distance_mm','new_ride'}:raise ValueError('Unsupported Gym action')
     result=[]
+    if 'units' in value:
+        if value['units'] not in ('metric','imperial'):raise ValueError('Choose metric or imperial units')
+        result.append(('UNITS '+value['units'].upper()+'\n').encode())
+    if 'distance_mm' in value:
+        n=value['distance_mm']
+        if type(n) is not int or not 100<=n<=100000:raise ValueError('Distance must be 0.1–100 metres per turn')
+        result.append(f'DISTANCE_MM {n}\n'.encode())
+    if 'new_ride' in value:
+        if value['new_ride'] is not True:raise ValueError('New ride requires an explicit reset action')
+        result.append(b'NEW RIDE\n')
     if 'title' in value:
         if not valid_title(value['title']):raise ValueError('Use 1–24 printable ASCII characters for the display title')
         result.append(b'TITLE '+value['title'].encode('ascii').hex().encode('ascii')+b'\n')
@@ -141,6 +165,7 @@ class GymControl:
                         partial=wanted['glow']
                         if not isinstance(partial,dict) or not partial or set(partial)-{'peak','centre','high_floor'}:raise ValueError('Invalid pulse fields')
                         wanted['glow']={**value['glow'],**partial}
+                    if set(wanted)&{'units','distance_mm','new_ride'} and 'ride' not in value:raise ValueError('Update the Gym firmware to enable ride metrics')
                     if 'title' in wanted and 'title' not in value:raise ValueError('This Gym firmware needs the title update over USB first')
                     packets=commands(wanted)
                     sent=False
@@ -157,6 +182,7 @@ class GymControl:
                         if not ack:raise OSError('Gym setting acknowledgement missing')
                     if sent:value=self.read_status(port,binding)
                     for key,want in wanted.items():
+                        if key=='new_ride':continue
                         if value[key]!=want:raise OSError('Gym setting readback differs')
                     self.last_token=token
                 except ValueError as e:error=str(e)

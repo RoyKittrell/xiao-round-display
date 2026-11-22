@@ -128,23 +128,45 @@ extension AppDelegate {
             prepareMenuIfNeeded()
         }catch{showError(error.localizedDescription)}
     }
-    func beginDeviceProfileInstall(_ profile:String,id:String)throws{
+    func addFirmwareMenu(){
+        guard ["desktop","gym"].contains(selectedRole) else{return}
+        let firmware=submenu("Firmware")
+        guard hardware["family"] as? String == "esp32s3" else{
+            add("Update this controller using Arduino / USB",to:firmware,enabled:false)
+            add("In-app firmware updates support ESP32-S3",to:firmware,enabled:false)
+            return
+        }
+        let supported=hardware["ota_supported"] as? Bool == true
+        add(supported ? "Wi-Fi updates enabled":"USB update needed to enable Wi-Fi updates",to:firmware,enabled:false)
+        add("Update Firmware over Wi-Fi…",to:firmware,action:#selector(updateFirmwareWifi(_:)),enabled:supported && connectionSettings["wifi_host"] != nil && !wifiSetupRunning)
+        add("Update Firmware via USB…",to:firmware,action:#selector(updateFirmwareUSB(_:)),enabled:deviceCatalog[selectedDeviceId]?["usb_present"] as? Bool == true && !wifiSetupRunning)
+    }
+    @objc func updateFirmwareWifi(_ sender:NSMenuItem){
+        do{try beginDeviceProfileInstall(selectedRole,id:selectedDeviceId,mode:"wifi")}catch{showError(error.localizedDescription)}
+    }
+    @objc func updateFirmwareUSB(_ sender:NSMenuItem){
+        do{try beginDeviceProfileInstall(selectedRole,id:selectedDeviceId,mode:"usb_update")}catch{showError(error.localizedDescription)}
+    }
+    func beginDeviceProfileInstall(_ profile:String,id:String,mode:String="profile")throws{
         guard ["desktop","gym"].contains(profile),id==selectedDeviceId else{throw NSError(domain:"XIAOProfile",code:1,userInfo:[NSLocalizedDescriptionKey:"Select a valid device profile."])}
         let record=deviceCatalog[id] ?? [:]
         let family=hardware["family"] as? String ?? record["family"] as? String ?? "unknown"
         guard family=="esp32s3" else{throw NSError(domain:"XIAOProfile",code:2,userInfo:[NSLocalizedDescriptionKey:"Profile switching currently supports positively identified ESP32-S3 boards. Existing Desktop builds on other controllers remain supported."])}
-        guard record["usb_present"] as? Bool == true else{throw NSError(domain:"XIAOProfile",code:3,userInfo:[NSLocalizedDescriptionKey:"Connect this XIAO with a USB data cable to apply its profile. Its saved name has been updated."])}
+        guard mode=="wifi" || record["usb_present"] as? Bool == true else{throw NSError(domain:"XIAOProfile",code:3,userInfo:[NSLocalizedDescriptionKey:"Connect this XIAO with a USB data cable to apply its profile. Its saved name has been updated."])}
+        if mode=="wifi" && (hardware["ota_supported"] as? Bool != true || connectionSettings["wifi_host"]==nil){throw NSError(domain:"XIAOOTA",code:1,userInfo:[NSLocalizedDescriptionKey:"Install the Wi-Fi update firmware once via USB, and set up this display's Wi-Fi first."])}
         let requestedEpoch=selectionEpoch
         let python=Bundle.main.object(forInfoDictionaryKey:"XIAOPythonPath") as? String ?? ""
-        let script=Bundle.main.resourceURL!.appendingPathComponent("companion/device_profiles.py")
+        let script=Bundle.main.resourceURL!.appendingPathComponent(mode=="wifi" ? "companion/firmware_update.py":"companion/device_profiles.py")
         let panel=NSPanel(contentRect:NSRect(x:0,y:0,width:400,height:110),styleMask:[.titled],backing:.buffered,defer:false)
-        panel.title="Applying Device Profile"
-        let label=NSTextField(wrappingLabelWithString:"Installing \(profile=="gym" ? "Gym Display":"Desktop")…\nKeep this XIAO connected by USB. Other displays continue updating.")
-        label.frame=NSRect(x:20,y:25,width:360,height:65);panel.contentView?.addSubview(label);panel.center();panel.makeKeyAndOrderFront(nil)
+        panel.title=mode=="profile" ? "Applying Device Profile":"Updating Firmware"
+        let label=NSTextField(wrappingLabelWithString:"Installing \(profile=="gym" ? "Gym Display":"Desktop")…\n\(mode=="wifi" ? "Keep this XIAO powered on and connected to Wi-Fi.":"Keep this XIAO connected by USB.") Other displays continue updating.")
+        label.frame=NSRect(x:20,y:25,width:360,height:65);panel.contentView?.addSubview(label)
+        let spinner=NSProgressIndicator(frame:NSRect(x:20,y:8,width:360,height:12));spinner.style = .bar;spinner.isIndeterminate=true;spinner.startAnimation(nil);panel.contentView?.addSubview(spinner)
+        panel.center();panel.makeKeyAndOrderFront(nil)
         wifiSetupRunning=true;prepareMenuIfNeeded()
         DispatchQueue.global(qos:.userInitiated).async{[weak self] in
             let process=Process(),output=Pipe();process.executableURL=URL(fileURLWithPath:python)
-            process.arguments=["-B",script.path,"--device",id,"--profile",profile]
+            process.arguments=["-B",script.path,"--device",id,"--profile",profile]+(mode=="usb_update" ? ["--force"]:[])
             var env=ProcessInfo.processInfo.environment;env["XIAO_DISPLAY_DATA_DIR"]=dataRoot.path;process.environment=env
             process.standardOutput=output;process.standardError=FileHandle.nullDevice
             var result:[String:Any]=[:]
@@ -163,8 +185,8 @@ extension AppDelegate {
                 else{self.connectionSettings.removeValue(forKey:"bluetooth_for_workout")}
                 self.connectionSettings["selection_epoch"]=UUID().uuidString
                 self.health=[:];self.device=[:];self.gymState=[:];self.saveConnection()
-                let done=NSAlert();done.messageText="\(profile=="gym" ? "Gym Display":"Desktop") profile ready"
-                done.informativeText="The XIAO confirmed its new firmware. Its menus will refresh as the helper reconnects. Saved profile settings and other devices are preserved."
+                let done=NSAlert();done.messageText=mode=="profile" ? "\(profile=="gym" ? "Gym Display":"Desktop") profile ready":"Firmware confirmed"
+                done.informativeText="The XIAO confirmed its firmware. Its menus will refresh as the helper reconnects. Saved profile settings and other devices are preserved."
                 done.addButton(withTitle:"Done");done.runModal()
             }
         }

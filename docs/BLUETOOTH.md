@@ -34,12 +34,14 @@ Treat Bluetooth as experimental and retain USB for setup and recovery.
 Choose existing scenes; hide/re-enable carousel entries; select saved profiles;
 change playback, appearance, brightness or power; synchronize time; and deliver
 live-source packets. All scenes remain saved when excluded. New rendering code,
-animations, clock faces or compiled assets require a USB firmware upload.
+animations, clock faces or compiled assets require a new matching firmware build.
+Use USB, or paired Wi-Fi on an OTA-capable S3; see [OTA.md](../device_profiles/OTA.md).
+Bluetooth itself does not install firmware.
 
 Large Sun images are slower over Bluetooth. Transfers yield to controls and
 health updates after each acknowledged pixel packet; source timestamps retain
 their original meaning. A completed full wireless image transfer is not yet a
-hardware-verified claim. There is no wireless firmware updater or placeholder
+hardware-verified claim. There is no Bluetooth firmware updater or placeholder
 DFU service. The Mac's own network connection is still required for live feeds.
 
 ## If discovery or pairing stalls

@@ -40,6 +40,19 @@ extension AppDelegate {
             let entry=add(label,to:demo,action:#selector(gymDemo(_:)),tag:index,checked:on==(index==0),enabled:connected && current["ready"] as? Bool == true)
             entry.representedObject=["target":selectedDeviceId,"selection":selectionEpoch]
         }
+        let rideMenu=submenu("Ride Data")
+        let ready=connected && current["ride"] is [String:Any] && !wifiSetupRunning
+        if let ride=current["ride"] as? [String:Any] {
+            let imperial=current["units"] as? String=="imperial"
+            let distance=(ride["distance_m"] as? Double ?? 0)/(imperial ? 1609.344:1000)
+            add(String(format:"Distance · %.3f %@",distance,imperial ? "mi":"km"),to:rideMenu,enabled:false)
+            add(String(format:"Estimated work · %.2f kJ",ride["work_kj"] as? Double ?? 0),to:rideMenu,enabled:false)
+        }
+        for (tag,label) in ["Kilometres · km/h","Miles · mph"].enumerated(){add(label,to:rideMenu,action:#selector(gymUnits(_:)),tag:tag,checked:current["units"] as? String==(tag==0 ? "metric":"imperial"),enabled:ready)}
+        add("Distance per Pedal Turn…",to:rideMenu,action:#selector(gymDistance(_:)),enabled:ready)
+        add("Start New Ride…",to:rideMenu,action:#selector(gymNewRide(_:)),enabled:ready)
+        add("Provisional distance · default 5 m/turn",to:rideMenu,enabled:false)
+        add("Watch virtual wheel · set 2100 mm",to:rideMenu,enabled:false)
         let connections=submenu("Connections")
         let mode=connectionSettings["mode"] ?? "usb"
         let ble=hardware["bluetooth"] as? Bool == true
@@ -53,7 +66,7 @@ extension AppDelegate {
         if hardware["watch_csc"] as? Bool == true {
             let watch=NSMenu();watch.autoenablesItems=false
             add("Bluetooth · Apple Watch",to:connections).submenu=watch
-            add(current["watch_streaming"] as? Bool == true ? "Workout cadence streaming":"Ready for Apple Watch",to:watch,enabled:false)
+            add(current["watch_streaming"] as? Bool == true ? "Workout sensor streaming":"Ready for Apple Watch",to:watch,enabled:false)
             add("Connect Apple Watch…",to:watch,action:#selector(showWatchPairing(_:)))
             let ppr=current["pulses_per_revolution"] as? Int ?? 1
             add("Sensor calibration: \(ppr) pulse\(ppr==1 ? "":"s") per turn",to:watch,enabled:false)
@@ -70,7 +83,7 @@ extension AppDelegate {
         NSApp.activate(ignoringOtherApps:true)
         let alert=NSAlert();alert.messageText="Connect Gym Xiao to Apple Watch"
         let suffix=String((connectionSettings["usb_serial"] ?? "").filter{$0.isLetter || $0.isNumber}.suffix(6)).uppercased()
-        alert.informativeText="On your watch, open Settings → Bluetooth. Under Health Devices, choose Gym Xiao-\(suffix), then start an Indoor Cycle workout. The watch receives real pedal cadence; desk Demo Mode does not send simulated workouts. The Mac uses USB first, then Wi-Fi."
+        alert.informativeText="On your watch, open Settings → Bluetooth. Under Health Devices, choose Gym Xiao-\(suffix), then start an Indoor Cycle workout. The watch receives real pedal cadence, estimated power and virtual wheel data. In the sensor settings, set Wheel Size to 2100 mm if offered. Indoor speed/distance display depends on the Watch workout view. Desk Demo Mode does not send simulated workouts. The Mac uses USB first, then Wi-Fi."
         alert.addButton(withTitle:"OK");alert.runModal()
     }
     @objc func gymSlider(_ sender:NSSlider){
@@ -102,6 +115,35 @@ extension AppDelegate {
             catch{self.showError("Could not queue Gym settings: \(error.localizedDescription)")}
         }
         gymSendWork=work;DispatchQueue.main.asyncAfter(deadline:.now()+0.22,execute:work)
+    }
+    func refreshRideItems(){
+        guard let items=menu.items.first(where:{$0.title=="Ride Data"})?.submenu?.items,items.count>=2,let ride=gymCurrent["ride"] as? [String:Any] else{return}
+        let imperial=gymCurrent["units"] as? String=="imperial"
+        items[0].title=String(format:"Distance · %.3f %@",(ride["distance_m"] as? Double ?? 0)/(imperial ? 1609.344:1000),imperial ? "mi":"km")
+        items[1].title=String(format:"Estimated work · %.2f kJ",ride["work_kj"] as? Double ?? 0)
+    }
+    @objc func gymUnits(_ sender:NSMenuItem){
+        guard selectedRole=="gym",connected else{return}
+        gymDesired["units"]=sender.tag==0 ? "metric":"imperial";scheduleGymAction()
+    }
+    @objc func gymDistance(_ sender:NSMenuItem){
+        guard selectedRole=="gym",connected else{return}
+        let id=selectedDeviceId,epoch=selectionEpoch
+        let alert=NSAlert();alert.messageText="Distance per Pedal Turn"
+        alert.informativeText="The provisional value is 5 metres per full pedal revolution. Later, divide the original console's distance increase by the number of turns. Changes affect future distance only."
+        let field=NSTextField(frame:NSRect(x:0,y:0,width:320,height:26));field.stringValue=String(format:"%.3f",Double(gymCurrent["distance_mm"] as? Int ?? 5000)/1000)
+        alert.accessoryView=field;alert.addButton(withTitle:"Save Metres per Turn");alert.addButton(withTitle:"Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn,selectedDeviceId==id,selectionEpoch==epoch else{return}
+        guard let metres=Double(field.stringValue),metres.isFinite,metres>=0.1,metres<=100 else{showError("Enter 0.1–100 metres per full turn.");return}
+        gymDesired["distance_mm"]=Int((metres*1000).rounded());scheduleGymAction()
+    }
+    @objc func gymNewRide(_ sender:NSMenuItem){
+        guard selectedRole=="gym",connected else{return}
+        let id=selectedDeviceId,epoch=selectionEpoch
+        let alert=NSAlert();alert.messageText="Start a new ride?";alert.informativeText="Reset the real ride totals and peaks. Raw pedal logs and Watch sensor counters are retained. Demo data is separate."
+        alert.addButton(withTitle:"Start New Ride");alert.addButton(withTitle:"Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn,selectedDeviceId==id,selectionEpoch==epoch else{return}
+        gymDesired["new_ride"]=true;scheduleGymAction()
     }
     func updateGymControls(){
         guard selectedRole=="gym" else{return}

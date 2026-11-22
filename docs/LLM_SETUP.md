@@ -47,8 +47,11 @@ README.md, docs/SETUP.md, docs/PRIVACY.md and AGENTS.md before making changes.
   retain the underlying Python installation. Local ad-hoc signing can cause
   macOS to ask for Bluetooth access again after rebuilding. Check the named
   helper in Privacy & Security → Bluetooth and retry discovery; keep USB usable.
-- Scene selection, inclusion and data updates can use Bluetooth. Creating a
-  renderer/animation or adding compiled assets still requires USB firmware upload.
+- Scene selection, inclusion and data updates can use Bluetooth. New rendering
+  code/assets must be compiled for the exact controller. Initial installation and
+  purpose changes use USB; an OTA-capable S3 can subsequently install its bundled
+  same-profile build over paired Wi-Fi. C6/Nordic firmware updates remain USB.
+  Read device_profiles/OTA.md; do not promise automatic crash rollback.
 - Distinguish offline coverage, originating-hardware observations and a new
   owner's actual checks. Final-package Bluetooth reconnect/permission testing
   and complete wireless Sun-image delivery are not yet verified.

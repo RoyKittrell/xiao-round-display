@@ -257,7 +257,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
         [String(prefs.revision),String(currentScene),String(connected),String(actualNight),
          String(device["sleeping"] as? Int ?? -1),String(device["revision"] as? UInt32 ?? 0),
          String(device["day_brightness"] as? Int ?? -1),String(device["night_brightness"] as? Int ?? -1),
-         device["error"] as? String ?? "",String(profileMenuGeneration),selectedDeviceId,selectionEpoch,catalogSignature,selectedRole,String(hardware["watch_csc"] as? Bool ?? false),String(gymCurrent["watch_streaming"] as? Bool ?? false),String(gymCurrent["pulses_per_revolution"] as? Int ?? 1),String(gymCurrent["ready"] as? Bool ?? false),String(gymCurrent["demo"] as? Bool ?? false),connectionSettings["mode"] ?? "usb",connectionSettings["bluetooth_id"] ?? "",hardware["model"] as? String ?? "",String(wifiFirmware),String(hardware["control_version"] as? Int ?? 2),String(bluetoothScanRunning),String(wifiSetupRunning),connectionSettings["wifi_host"] ?? "",String(weatherLocationBusy),weatherPlace?.city ?? ""].joined(separator:"|")
+         device["error"] as? String ?? "",String(profileMenuGeneration),selectedDeviceId,selectionEpoch,catalogSignature,selectedRole,String(hardware["ota_supported"] as? Bool ?? false),String(hardware["watch_csc"] as? Bool ?? false),String(gymCurrent["watch_streaming"] as? Bool ?? false),String(gymCurrent["pulses_per_revolution"] as? Int ?? 1),String(gymCurrent["ready"] as? Bool ?? false),String(gymCurrent["demo"] as? Bool ?? false),gymCurrent["units"] as? String ?? "",String(gymCurrent["distance_mm"] as? Int ?? 5000),connectionSettings["mode"] ?? "usb",connectionSettings["bluetooth_id"] ?? "",hardware["model"] as? String ?? "",String(wifiFirmware),String(hardware["control_version"] as? Int ?? 2),String(bluetoothScanRunning),String(wifiSetupRunning),connectionSettings["wifi_host"] ?? "",String(weatherLocationBusy),weatherPlace?.city ?? ""].joined(separator:"|")
     }
     func prepareMenuIfNeeded(){if !menuIsOpen && menuSignature != lastMenuSignature{rebuild()}}
     func menuWillOpen(_ menu:NSMenu){
@@ -283,7 +283,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     }
     func submenu(_ title:String)->NSMenu{let m=NSMenu();m.autoenablesItems=false;add(title).submenu=m;return m}
     func rebuild(){
-        menu.removeAllItems();addDevicePicker()
+        menu.removeAllItems();addDevicePicker();addFirmwareMenu()
         if selectedRole=="gym"{addGymMenus();lastMenuSignature=menuSignature;return}
         if selectedRole != "desktop" {
             add(connected ? "Identifying device…":"Selected device disconnected",enabled:false)
@@ -431,6 +431,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
         return "\(label) · \(status)"
     }
     func refreshSourceItems(){
+        refreshRideItems()
         for (key,entry) in sourceEntries{if let title=sourceTitle(key),entry.title != title{entry.title=title}}
     }
     func saveConnection(){
@@ -601,7 +602,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
 }
 @main struct HelperMain {
     static func main(){
-        if CommandLine.arguments.contains("--version"){print("XIAO Display Helper 2.12.0");return}
+        if CommandLine.arguments.contains("--version"){print("XIAO Display Helper 2.14.1");return}
         let app=NSApplication.shared
         let delegate=AppDelegate();app.delegate=delegate;withExtendedLifetime(delegate){app.run()}
     }

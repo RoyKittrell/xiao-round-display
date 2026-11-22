@@ -35,7 +35,8 @@ It then reprobes that device and changes its menus/feed workers. Other devices
 continue updating. A failed preflight restores normal boot where possible and
 leaves the old firmware in place; a failed write retains a private recovery image.
 Disconnect the bike sensor before repurposing a board for another wiring setup.
-Wi-Fi firmware updates are not implemented; purpose changes require USB.
+Same-profile S3 firmware updates can use paired Wi-Fi after one USB bootstrap;
+see [OTA.md](OTA.md). Purpose changes still require USB.
 
 ## Build and package
 
@@ -64,6 +65,6 @@ shared USB IDs alone are not hardware identification.
 Both S3 modules compile. Offline tests cover native Device Settings widgets,
 per-device aliases, switching isolation, checksum/MAC/partition refusals, recovery
 and application-only writes, Gym title encoding/acknowledgement, toggle persistence,
-and preserving existing filesystem data. Helper 2.12.0 and Gym r16 were tested on the originating installation. The originating installation confirmed the metric tap toggle physically. Two live workers remain
+and preserving existing filesystem data. Helper 2.14.1 and Gym r18 were tested on the originating installation. The originating installation confirmed the metric tap toggle physically. Two live workers remain
 independent. Physical Desktop→Gym→Desktop installation is intentionally awaiting
 a user-initiated test; no board has been repurposed as part of these automated checks.

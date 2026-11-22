@@ -176,7 +176,9 @@ Wi-Fi hardware; follow [WIFI.md](WIFI.md) after the matching firmware upload.
 Bluetooth controls were exercised on the originating hardware; the final
 package's permission/reconnection check remains pending. Keep USB available
 while setting up. Changing rendering code or adding a new animation still
-requires a USB firmware upload.
+requires compiling matching firmware. Upload by USB, or use paired Wi-Fi on an
+OTA-capable S3 as described in [OTA.md](../device_profiles/OTA.md).
+C6/Nordic firmware uploads remain USB.
 
 ## 7. Connect optional sources
 

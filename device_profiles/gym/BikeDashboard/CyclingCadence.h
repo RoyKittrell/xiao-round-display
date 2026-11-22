@@ -10,11 +10,15 @@ class CyclingCadence {
 public:
   void calibrate(uint8_t value){if(value>=1&&value<=16){pulsesPerRevolution=value;phase=0;intervalUs=0;haveCrank=false;}}
   uint8_t calibration()const{return pulsesPerRevolution;}
-  void pulse(uint64_t eventUs){
-    if(++phase<pulsesPerRevolution)return;
-    if(haveCrank) intervalUs=eventUs-lastCrankUs;
+  bool pulse(uint64_t eventUs){
+    if(++phase<pulsesPerRevolution)return false;
+    if(haveCrank){
+      uint64_t gap=eventUs-lastCrankUs;
+      uint64_t timeout=intervalUs*3>4000000ULL?intervalUs*3:4000000ULL;
+      intervalUs=intervalUs&&gap>timeout?0:gap;
+    }
     lastCrankUs=eventUs;haveCrank=true;
-    phase=0;++revolutions;eventTime=uint16_t(eventUs*1024ULL/1000000ULL);
+    phase=0;++revolutions;eventTime=uint16_t(eventUs*1024ULL/1000000ULL);return true;
   }
   float rpm(uint64_t nowUs)const{
     if(!haveCrank||!intervalUs||nowUs<lastCrankUs)return 0;

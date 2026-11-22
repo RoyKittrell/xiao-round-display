@@ -8,10 +8,10 @@ def host_from_device(device):
     return host
 
 class WifiSession:
-    def __init__(self,host):self.host=host;self.socket=None;self.buffer=bytearray()
+    def __init__(self,host,port=7443,root=None):self.host=host;self.port=port;self.root=root;self.socket=None;self.buffer=bytearray()
     def connect(self):
         if self.socket:return
-        root=Path(os.environ.get('XIAO_DISPLAY_DATA_DIR',Path.home()/'Library/Application Support/XIAO Display Helper'))
+        root=Path(self.root or os.environ.get('XIAO_DISPLAY_DATA_DIR',Path.home()/'Library/Application Support/XIAO Display Helper'))
         record=json.loads((root/'private/wifi'/f'{self.host}.json').read_text())
         context=ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT);context.minimum_version=ssl.TLSVersion.TLSv1_2
         context.load_verify_locations(cadata=record['certificate']);context.set_ciphers('ECDHE-ECDSA-AES128-GCM-SHA256')
@@ -20,7 +20,7 @@ class WifiSession:
         for address in addresses:
             raw=None
             try:
-                raw=socket.create_connection((address,7443),timeout=5)
+                raw=socket.create_connection((address,self.port),timeout=5)
                 raw.setsockopt(socket.IPPROTO_TCP,socket.TCP_NODELAY,1)
                 self.socket=context.wrap_socket(raw,server_hostname=self.host)
                 self.socket.sendall(('AUTH '+record['token']+'\n').encode())

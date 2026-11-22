@@ -6,6 +6,13 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT/'companion')
 from hardware_profile import identify,HardwareProfile
 import display_transport as transport
 class Hardware(unittest.TestCase):
+ def test_ota_capability_and_running_slot_are_explicit(self):
+  elf='42'*32
+  s3=identify(['FIRMWARE esp32s3-public-r35-wifi-ota',f'OTA supported=1 elf={elf} address=0x340000'],'usb')
+  self.assertTrue(s3['ota_supported']);self.assertEqual(s3['ota_address'],0x340000);self.assertEqual(s3['ota_elf'],elf)
+  for tag in ('esp32c6-public-r34-wifi','nrf54-public-r34'):
+   self.assertFalse(identify(['FIRMWARE '+tag,'OTA supported=0'],'usb')['ota_supported'])
+  self.assertNotIn('ota_supported',identify(['FIRMWARE esp32s3-scenes-r33-wifi'],'usb'))
  def test_firmware_profiles_and_legacy(self):
   for tag,family,name,wifi in [('esp32s3-scenes-r33-wifi','esp32s3','XIAO ESP32-S3',True),('esp32c6-scenes-r33-wifi','esp32c6','XIAO ESP32-C6',True),('nrf54-scenes-r30','nrf54','XIAO nRF54LM20A Sense',False),('public-template-r26','nrf54','XIAO nRF54LM20A Sense',False)]:
    v=identify(['FIRMWARE '+tag],'usb');self.assertEqual(v['family'],family);self.assertEqual(v['model'],name);self.assertEqual(v['wifi_hardware'],wifi);self.assertTrue(v['bluetooth'])

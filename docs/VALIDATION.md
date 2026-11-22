@@ -1,10 +1,10 @@
 # Validation scope
 
-The public r34 source is a blank template. It has not been installed with a new
+The public Desktop r35 (S3) / r34 (C6/Nordic) source is a blank template. It has not been installed with a new
 owner’s printer/account/network settings. No configured app bundle or captured
 firmware image is published.
 
-## Helper 2.12.0 and device-purpose modules
+## Helper 2.14.1, Wi-Fi updates and device-purpose modules
 
 - Both public ESP32-S3 purpose modules compile with Arduino ESP32 core 3.3.12;
   the native helper stages and signs locally. No configured binary is committed.
@@ -19,6 +19,24 @@ firmware image is published.
   heuristic watt estimate calibrated. C6/Nordic purpose switching is unavailable.
 - Existing public default/configuration, source opt-in, astronomy, renderer,
   transport, privacy and native menu checks remain part of the release suite.
+
+## Firmware-update and ride-data coverage
+
+- The actual OTA receiver runs under ASan/UBSan with real SHA256, fragmented
+  input/output, failed writes, invalid images and profile/layout/hash refusals.
+  Host tests cover pairing/identity checks, exact transfer, commit/readback and
+  per-device maintenance cleanup. TLS pinning/authentication use local fixtures.
+- Ride tests cover real crank intervals, no idle energy, pauses, persistence,
+  reset/calibration behavior, averages/peaks and CSC/CPS wheel/crank timebases.
+  Demo data remains separate from real rides and Watch notifications.
+- Originating Gym r17/r18 completed actual Wi-Fi OTA and confirmed a different
+  running slot and expected ELF. Desktop OTA transfer is still unverified; see
+  [OTA.md](../device_profiles/OTA.md). C6/Nordic OTA is disabled.
+- A separate C6 was updated to the public r34 build over USB. Firmware identity
+  and helper reconnection were confirmed; Big Ben sustained approximately25FPS.
+  That does not qualify C6 Wi-Fi/TLS or physical touch on every panel.
+- Current public source is compiled separately for S3 Desktop/Gym, C6 Desktop
+  and Nordic Desktop. No hardware is flashed as part of publication checks.
 
 ## Earlier Desktop update
 

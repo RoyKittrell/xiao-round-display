@@ -5,12 +5,15 @@
 #include <BLESecurity.h>
 #include <esp_timer.h>
 #include <services/gatt/ble_svc_gatt.h>
+#define XIAO_DEVICE_PROFILE "gym"
 #include "WifiLink.h"
 #include "CyclingCadence.h"
 #include "EstimatedPower.h"
+#include "RideStats.h"
+#include "VirtualWheel.h"
 
 // USB/TLS carry controls. Bluetooth exposes only the standard read/notify CSC
-// sensor, with normal no-input/no-output bonding and no writable control GATT.
+// sensors (real cranks, virtual wheel and estimated power), with normal no-input/no-output bonding and no writable control GATT.
 class HostLink:public Stream {
   static HostLink* instance;
   BLEServer* server=nullptr;
@@ -19,6 +22,8 @@ class HostLink:public Stream {
   int resistanceLevel=1;
   uint16_t featureHandle=0;
   CyclingCadence cadence;
+  RideStats rideTotals;VirtualWheel wheel;double bluetoothJoules=0;
+  uint32_t distanceMM=5000,rideSavedAt=0;bool wasMoving=false;
   WifiLink wifi;
   bool started=false,lineActive=false;
   uint8_t replyTransport=0,lineTransport=0;
@@ -71,7 +76,7 @@ public:
     measurement=service->createCharacteristic(BLEUUID(uint16_t(0x2a5b)),BLECharacteristic::PROPERTY_NOTIFY);
     measurement->setCallbacks(&measurementCallbacks);
     auto feature=service->createCharacteristic(BLEUUID(uint16_t(0x2a5c)),BLECharacteristic::PROPERTY_READ);
-    uint8_t flags[2]={2,0};feature->setValue(flags,2);
+    uint8_t flags[2]={3,0};feature->setValue(flags,2);
     auto location=service->createCharacteristic(BLEUUID(uint16_t(0x2a5d)),BLECharacteristic::PROPERTY_READ);
     uint8_t other=0;location->setValue(&other,1);
     if(!service->start())return false;
@@ -79,7 +84,7 @@ public:
     powerMeasurement=powerService->createCharacteristic(BLEUUID(uint16_t(0x2a63)),BLECharacteristic::PROPERTY_NOTIFY);
     powerMeasurement->setCallbacks(&measurementCallbacks);
     auto powerFeature=powerService->createCharacteristic(BLEUUID(uint16_t(0x2a65)),BLECharacteristic::PROPERTY_READ);
-    uint8_t powerFlags[4]={8,0,0,0}; // Crank revolution data supported only.
+    uint8_t powerFlags[4]={140,0,0,0}; // Wheel + crank data; wheel is virtual (2100 mm).
     powerFeature->setValue(powerFlags,4);
     auto powerLocation=powerService->createCharacteristic(BLEUUID(uint16_t(0x2a5d)),BLECharacteristic::PROPERTY_READ);
     powerLocation->setValue(&other,1);
@@ -91,18 +96,22 @@ public:
     started=featureHandle&&featureHandle!=0xffff;return started;
   }
   void serviceBluetooth(){
+    rideTotals.tick(esp_timer_get_time());
+    bool moving=realCadence()>0;
+    if(rideTotals.dirty&&((wasMoving&&!moving)||uint32_t(millis()-rideSavedAt)>=30000))saveRide();
+    wasMoving=moving;
     wifi.service();
     if(wifiEpoch!=wifi.epoch()){
       wifiEpoch=wifi.epoch();++inputEpoch;if(lineTransport==2)lineActive=false;
     }
     if(lineActive&&uint32_t(millis()-lastByte)>5000){lineActive=false;++inputEpoch;}
     if(started&&connected&&subscribed&&uint32_t(millis()-sentAt)>=1000){
-      uint8_t data[5];cadence.measurement(data);
+      uint8_t data[11];wheel.csc(data,cadence.count(),cadence.time());
       auto packet=ble_hs_mbuf_from_flat(data,sizeof(data));
       if(packet&&!ble_gatts_notify_custom(connection,measurement->getHandle(),packet))sentAt=millis();
     }
     if(started&&connected&&powerSubscribed&&uint32_t(millis()-powerSentAt)>=1000){
-      uint8_t data[8];powerPacket(data);
+      uint8_t data[16];powerPacket(data);
       auto packet=ble_hs_mbuf_from_flat(data,sizeof(data));
       if(packet&&!ble_gatts_notify_custom(connection,powerMeasurement->getHandle(),packet))powerSentAt=millis();
     }
@@ -110,20 +119,28 @@ public:
   void setResistance(int n){resistanceLevel=n;}
   float realCadence()const{return cadence.rpm(esp_timer_get_time());}
   int16_t realPower()const{return estimatedWatts(realCadence(),resistanceLevel);}
-  void powerPacket(uint8_t data[8])const{
-    int16_t watts=realPower();
-    data[0]=0x20;data[1]=0; // Crank revolution data present (bit 5).
-    data[2]=uint8_t(watts);data[3]=uint8_t(uint16_t(watts)>>8);
-    data[4]=uint8_t(cadence.count());data[5]=uint8_t(cadence.count()>>8);
-    data[6]=uint8_t(cadence.time());data[7]=uint8_t(cadence.time()>>8);
+  void powerPacket(uint8_t data[16])const{wheel.power(data,realPower(),cadence.count(),cadence.time(),uint16_t(uint64_t(bluetoothJoules/1000)));}
+  RideStats& ride(){return rideTotals;}
+  uint32_t distanceMillimetres()const{return distanceMM;}
+  double metresPerRevolution()const{return distanceMM/1000.0;}
+  void setDistanceMM(uint32_t mm){if(mm>=100&&mm<=100000)distanceMM=mm;}
+  float realSpeedKph()const{return realCadence()*metresPerRevolution()*0.06;}
+  void saveRide(){
+    Preferences p;if(p.begin("bike-ride",false)){auto data=rideTotals.data();if(p.putBytes("totals",&data,sizeof(data))==sizeof(data)){rideTotals.dirty=false;rideSavedAt=millis();}p.end();}
   }
+  void loadRide(){Preferences p;if(p.begin("bike-ride",true)){RideTotals data;if(p.getBytesLength("totals")==sizeof(data)&&p.getBytes("totals",&data,sizeof(data))==sizeof(data))rideTotals.restore(data);p.end();}}
+  void newRide(){rideTotals.reset();saveRide();} // Watch counters remain monotonic.
   bool pairingVisible()const{return false;}
   const char* pairingPIN()const{return "";}
   uint16_t epoch()const{return inputEpoch;}
   bool bluetoothReady()const{return started;}
   bool cyclingReady()const{return started;}
   void crankPulse(uint32_t eventUs){
-    uint64_t now=esp_timer_get_time();cadence.pulse(now-uint32_t(uint32_t(now)-eventUs));
+    uint64_t now=esp_timer_get_time();uint64_t event=now-uint32_t(uint32_t(now)-eventUs);
+    if(cadence.pulse(event)){
+      float rpm=cadence.rpm(event);int watts=estimatedWatts(rpm,resistanceLevel);
+      double before=rideTotals.data().joules;rideTotals.pulse(event,rpm,watts,metresPerRevolution());bluetoothJoules+=rideTotals.data().joules-before;wheel.pulse(event,rpm,metresPerRevolution());
+    }
   }
   void setPulsesPerRevolution(uint8_t n){cadence.calibrate(n);}
   uint8_t pulsesPerRevolution()const{return cadence.calibration();}

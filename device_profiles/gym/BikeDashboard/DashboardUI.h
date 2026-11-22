@@ -34,7 +34,8 @@ uint32_t milestoneAt=0, lastMilestone=0;
 uint32_t fpsAt=0, fpsFrames=0;
 float uiFps=0;
 int resistance=1;
-bool showRpm=false;
+bool showRpm=false,imperialUnits=false;int ridePage=0;
+RideStats demoRide;
 char displayTitle[25]="BIKE LAB";
 bool demoMode=false;
 uint32_t demoStart=0,demoLastPulse=0,demoPulses=0,demoInterval=800000;
@@ -100,10 +101,11 @@ void demoService() {
   uint32_t now=millis();
   float rate=75+7*sinf((now-demoStart)*0.00022f);
   demoInterval=uint32_t(60000000.0f/rate);
-  if(now-demoLastPulse>=demoInterval/1000){demoLastPulse=now;++demoPulses;}
+  if(now-demoLastPulse>=demoInterval/1000){demoLastPulse=now;++demoPulses;demoRide.pulse(esp_timer_get_time(),60000000.0/demoInterval,estimatedWatts(60000000.0/demoInterval,resistance),hostLink.metresPerRevolution());}
+  demoRide.tick(esp_timer_get_time());
 }
 void setDemo(bool enabled) {
-  demoMode=enabled;demoStart=demoLastPulse=millis();demoPulses=0;
+  demoMode=enabled;demoStart=demoLastPulse=millis();demoPulses=0;demoRide.reset();
   Preferences p;if(p.begin("bike-ui",false)){p.putBool("demo",enabled);p.end();}
   record(enabled?"DEMO_ON":"DEMO_OFF",micros(),digitalRead(SENSOR_PIN),0);
 }
@@ -120,6 +122,12 @@ void setResistance(int value) {
   resistance=value;hostLink.setResistance(resistance); settingsDirty=true; settingsAt=millis();
   char event[24];snprintf(event,sizeof(event),"RESISTANCE_%d",resistance);
   record(event,micros(),digitalRead(SENSOR_PIN),0);
+}
+void setUnits(bool imperial){imperialUnits=imperial;Preferences p;if(p.begin("bike-ui",false)){p.putBool("imperial",imperial);p.end();}}
+void rideStatus(){
+  auto& ride=hostLink.ride();auto& d=ride.data();
+  hostLink.printf("RIDE units=%s mm_per_rev=%lu provisional=1 distance_m=%.3f speed_kph=%.3f revolutions=%llu elapsed_s=%.1f moving_s=%.1f work_kj=%.3f avg_w=%.2f avg_rpm=%.2f avg_kph=%.2f overall_w=%.2f overall_kph=%.2f max_w=%.0f max_rpm=%.2f max_kph=%.2f wheel_mm=2100\n",
+    imperialUnits?"imperial":"metric",(unsigned long)hostLink.distanceMillimetres(),d.metres,hostLink.realSpeedKph(),(unsigned long long)d.revolutions,d.elapsedUs/1e6,d.movingUs/1e6,d.joules/1000,ride.averageWatts(),ride.averageRpm(),ride.averageKph(),ride.overallWatts(),ride.overallKph(),d.maxWatts,d.maxRpm,d.maxKph);
 }
 void toggleMetric(){
   showRpm=!showRpm;Preferences p;
@@ -165,7 +173,8 @@ void touchService() {
     x=contact.x;y=contact.y;
     if(contact.down&&!touchHeld&&x>=0&&x<240&&y>=0&&y<240) {
       if(demoMode && y>=25 && y<=60 && x>=60 && x<=180){setDemo(false);}
-      else if(x>=40&&x<=200&&y>=70&&y<=125){toggleMetric();}
+      else if(y>=211&&x>=50&&x<=190){ridePage=(ridePage+1)%4;}
+      else if(ridePage==0&&x>=40&&x<=200&&y>=70&&y<=125){toggleMetric();}
       else if((x-60)*(x-60)+(y-177)*(y-177)<=24*24)setResistance(resistance-1);
       else if((x-180)*(x-180)+(y-177)*(y-177)<=24*24)setResistance(resistance+1);
     }
@@ -180,7 +189,8 @@ void uiSetup() {
   Preferences p;
   if(p.begin("bike-ui",true)){
     resistance=constrain(p.getUChar("resistance",1),1,8);
-    showRpm=p.getBool("show-rpm",false);
+    showRpm=p.getBool("show-rpm",false);imperialUnits=p.getBool("imperial",false);
+    hostLink.setDistanceMM(p.getUInt("distance-mm",5000));
     String title=p.getString("title",displayTitle);if(title.length()>=1&&title.length()<=24)title.toCharArray(displayTitle,sizeof(displayTitle));
     glowBrightness=constrain(p.getUChar("glow-peak",25),1,100);
     glowCentre=constrain(p.getUChar("glow-centre",60),5,100);
@@ -280,17 +290,44 @@ void uiDraw() {
   uiSmall(demoMode?"DEMO DATA":(healthy?"RECORDING":"LOG ERROR"),126,43,demoMode?UI_GOLD:(healthy?UI_GREEN:0xf800));
   float rpm=demoMode?rate/hostLink.pulsesPerRevolution():hostLink.realCadence();
   int watts=demoMode?estimatedWatts(rpm,resistance):hostLink.realPower();
-  char cadenceText[24];
-  if(showRpm)snprintf(cadenceText,sizeof(cadenceText),"%d EST W",watts);
-  else snprintf(cadenceText,sizeof(cadenceText),"%.0f RPM",rpm);
-  uiSmall(cadenceText,120,64,UI_CYAN);
-  char number[24];if(showRpm)snprintf(number,sizeof(number),"%.0f",rpm);else snprintf(number,sizeof(number),"%d",watts);
-  uiText(number,120,111,&FreeSansBold24pt7b,UI_WHITE);
-  char timer[16],count[24];uint32_t seconds=demoMode?(now-demoStart)/1000:(rideStart?(now-rideStart)/1000:0);
-  snprintf(timer,sizeof(timer),"%02lu:%02lu",(unsigned long)(seconds/60),(unsigned long)(seconds%60));
-  snprintf(count,sizeof(count),"%lu PULSES",(unsigned long)visiblePulses);
-  uiSmall(showRpm?"RPM":"ESTIMATED WATTS",120,118,UI_WHITE);
-  uiSmall(timer,76,133,UI_MUTED);uiSmall(count,163,133,UI_MUTED);
+  auto& ride=demoMode?demoRide:hostLink.ride();auto& totals=ride.data();
+  double speed=rpm*hostLink.metresPerRevolution()*0.06;
+  double speedUnit=imperialUnits?1/1.609344:1,distanceUnit=imperialUnits?1/1609.344:1/1000.0;
+  const char* speedLabel=imperialUnits?"MPH":"KM/H";const char* distanceLabel=imperialUnits?"MI":"KM";
+  char number[32];
+  if(ridePage==0){
+    char secondary[32];if(showRpm)snprintf(secondary,sizeof(secondary),"%d EST W",watts);else snprintf(secondary,sizeof(secondary),"%.0f RPM",rpm);
+    uiSmall(secondary,120,64,UI_CYAN);
+    if(showRpm)snprintf(number,sizeof(number),"%.0f",rpm);else snprintf(number,sizeof(number),"%d",watts);
+    uiText(number,120,111,&FreeSansBold24pt7b,UI_WHITE);
+    uiSmall(showRpm?"RPM":"ESTIMATED WATTS",120,118,UI_WHITE);
+    snprintf(number,sizeof(number),"%.1f %s   %.3f %s",speed*speedUnit,speedLabel,totals.metres*distanceUnit,distanceLabel);
+    uiSmall(number,120,133,UI_CYAN);
+  }else{
+    auto row=[&](int y,const char* label,const char* value){uiSmall(label,73,y,UI_MUTED);uiSmall(value,166,y,UI_WHITE);};
+    auto duration=[&](double seconds){snprintf(number,sizeof(number),"%02lu:%02lu:%02lu",(unsigned long)seconds/3600,(unsigned long)seconds/60%60,(unsigned long)seconds%60);};
+    if(ridePage==1){
+      duration(totals.elapsedUs/1e6);row(61,"ELAPSED",number);
+      duration(totals.movingUs/1e6);row(76,"MOVING",number);
+      duration(totals.elapsedUs>totals.movingUs?(totals.elapsedUs-totals.movingUs)/1e6:0);row(91,"PAUSED",number);
+      snprintf(number,sizeof(number),"%.3f %s",totals.metres*distanceUnit,distanceLabel);row(106,"EST DIST",number);
+      snprintf(number,sizeof(number),"%.2f KJ",totals.joules/1000);row(121,"EST WORK",number);
+      snprintf(number,sizeof(number),"%llu",(unsigned long long)totals.revolutions);row(136,"TURNS",number);
+    }else if(ridePage==2){
+      snprintf(number,sizeof(number),"%.0f W",ride.averageWatts());row(61,"MOV AVG W",number);
+      snprintf(number,sizeof(number),"%.0f RPM",ride.averageRpm());row(76,"AVG RPM",number);
+      snprintf(number,sizeof(number),"%.1f %s",ride.averageKph()*speedUnit,speedLabel);row(91,"MOV SPEED",number);
+      snprintf(number,sizeof(number),"%.0f W",ride.overallWatts());row(106,"RIDE AVG W",number);
+      snprintf(number,sizeof(number),"%.1f %s",ride.overallKph()*speedUnit,speedLabel);row(121,"RIDE SPEED",number);
+      snprintf(number,sizeof(number),"%.2f M/TURN",hostLink.metresPerRevolution());row(136,"EST DIST",number);
+    }else{
+      snprintf(number,sizeof(number),"%.0f W",totals.maxWatts);row(65,"PEAK W",number);
+      snprintf(number,sizeof(number),"%.0f RPM",totals.maxRpm);row(84,"PEAK RPM",number);
+      snprintf(number,sizeof(number),"%.1f %s",totals.maxKph*speedUnit,speedLabel);row(103,"PEAK SPEED",number);
+      snprintf(number,sizeof(number),"%.2f M",hostLink.metresPerRevolution());row(122,"M / TURN",number);
+      row(136,"WATCH WHEEL","2100 MM");
+    }
+  }
   canvas.drawFastHLine(51,142,138,0x21a6);
   uiSmall("RESISTANCE",120,151,UI_GOLD);
   for(int x:{60,180}) {
@@ -301,9 +338,9 @@ void uiDraw() {
   }
   snprintf(number,sizeof(number),"%d",resistance);
   uiText(number,120,187,&FreeSansBold18pt7b,UI_GOLD);
-  uiSmall("MANUAL SETTING",120,207,UI_MUTED);
-  uiSmall(demoMode?"TAP DEMO TO EXIT":"POWER IS AN ESTIMATE",120,221,demoMode?UI_GOLD:UI_MUTED);
-  if(!demoMode&&milestoneAt&&now-milestoneAt<1400) {
+  uiSmall("SPEED / DIST / POWER EST",120,207,UI_MUTED);
+  const char* pages[]={"LIVE  >","RIDE  >","AVERAGES  >","PEAKS  >"};uiSmall(pages[ridePage],120,221,UI_CYAN);
+  if(ridePage==0&&!demoMode&&milestoneAt&&now-milestoneAt<1400) {
     canvas.fillRoundRect(29,76,182,55,12,0x1146);
     snprintf(number,sizeof(number),"%lu PULSES!",(unsigned long)lastMilestone);
     uiText(number,120,109,&FreeSansBold9pt7b,UI_CYAN);

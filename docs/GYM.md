@@ -65,14 +65,22 @@ The Mac prefers USB, then the paired certificate-pinned Wi-Fi connection.
 Bluetooth on the Gym profile is reserved for the Watch and offers no Mac control
 writes. Wi-Fi settings are provisioned over USB. Neither the laptop nor Wi-Fi
 is needed for local sensing, display, calculation or Watch notifications.
-No Wi-Fi firmware updater or automatic sleep/wake feature is included.
+Same-profile updates can use paired Wi-Fi after one USB bootstrap; see
+[OTA.md](../device_profiles/OTA.md). No automatic sleep/wake feature is included.
 
 ## Validation limits
 
 On the originating S3 installation, a counted ten-turn test yielded ten accepted
 closures, Watch cadence followed faster pedalling and returned to zero, and the
 Watch subscribed to the new power characteristic and displayed zero at rest.
-The metric toggle was physically confirmed. Offline tests exercise packet bytes,
+The metric toggle was physically confirmed. The current r18 build also adds
+[ride totals and virtual wheel data](../device_profiles/gym/RIDE_METRICS.md).
+Distance defaults to a provisional 5 metres per full crank revolution and must
+be calibrated for each bike. Bluetooth wheel circumference is fixed at2100mm;
+set that value on the receiving device if offered. Virtual travel and estimated
+mechanical work are not outdoor distance or metabolic calories.
+
+Offline tests exercise packet bytes,
 the power model, stop timeout, calibration, title encoding, persistence and storage
 protection. These observations do not establish watt accuracy or qualify another
 bike/controller. Physical Desktop/Gym purpose-swap testing remains outstanding.

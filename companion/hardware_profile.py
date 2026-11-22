@@ -18,10 +18,18 @@ def identify(lines,endpoint):
         if line.startswith('STATUS firmware=bike-dashboard-'):
             match=re.search(r'firmware=(bike-dashboard-r[0-9]+) chip=([0-9a-fA-F]{12})',line)
             if match:firmware=match[1];gym_chip=bytes.fromhex(match[2])[::-1].hex();gym_status=line
+    ota={}
+    for line in lines:
+        if line.startswith('OTA '):
+            f=dict(re.findall(r'([a-z_]+)=([^\s]+)',line))
+            ota['ota_supported']=f.get('supported')=='1'
+            if re.fullmatch('[0-9a-f]{64}',f.get('elf','')):ota['ota_elf']=f['elf']
+            try:ota['ota_address']=int(f['address'],0)
+            except (KeyError,ValueError):pass
     if gym_chip:
         caps=dict(re.findall(r'([a-z_]+)=([^\s]+)',gym_status))
         wifi=caps.get('wifi_supported')=='1';ble=caps.get('ble_supported')=='1' and caps.get('ble_ready')=='1'
-        return {'role':'gym','family':'esp32s3','model':'Gym Xiao · ESP32-S3','firmware':firmware,'identified':True,'chip_serial':gym_chip,'usb':True,'bluetooth':ble,'watch_csc':caps.get('watch_csc')=='1','wifi_hardware':True,'wifi_firmware':wifi,'usb_setup_chunk':32,'usb_setup_pause_ms':15,'control_version':0,'scene_count':0,'clock_filters':False,'endpoint':str(endpoint),'updated_at':int(time.time())}
+        return {**ota,'role':'gym','family':'esp32s3','model':'Gym Xiao · ESP32-S3','firmware':firmware,'identified':True,'chip_serial':gym_chip,'usb':True,'bluetooth':ble,'watch_csc':caps.get('watch_csc')=='1','wifi_hardware':True,'wifi_firmware':wifi,'usb_setup_chunk':32,'usb_setup_pause_ms':15,'control_version':0,'scene_count':0,'clock_filters':False,'endpoint':str(endpoint),'updated_at':int(time.time())}
     for line in lines:
         if line.startswith('FIRMWARE '):firmware=line[9:].strip()[:100]
         if line.startswith('WIFI '):wifi_line=True
@@ -35,7 +43,7 @@ def identify(lines,endpoint):
     ble=ble or str(endpoint).startswith('ble://')
     wifi=wifi or wifi_line or str(endpoint).startswith('wifi://')
     wifi_firmware=wifi and (wifi_line or '-wifi' in firmware)
-    return {'role':'desktop' if family!='unknown' else 'unknown','family':family,'model':name,'firmware':firmware,'identified':family!='unknown',
+    return {**ota,'role':'desktop' if family!='unknown' else 'unknown','family':family,'model':name,'firmware':firmware,'identified':family!='unknown',
             'usb':True,'bluetooth':ble,'wifi_hardware':wifi,'wifi_firmware':wifi_firmware,
             'wifi_rows':wifi_firmware,'control_version':1 if legacy else 2,'scene_count':9 if legacy else 10,
             'clock_filters':not legacy,'firmware_update_recommended':legacy,'usb_setup_chunk':32,'usb_setup_pause_ms':15,
@@ -55,13 +63,13 @@ class HardwareProfile:
         port.write(b'?\n');port.flush();end=time.monotonic()+.6;lines=[]
         while time.monotonic()<end:
             line=port.readline().decode('ascii',errors='replace').strip()
-            if line.startswith(('FIRMWARE ','WIFI ','STATUS ')):lines.append(line[:400])
+            if line.startswith(('FIRMWARE ','WIFI ','STATUS ','OTA ')):lines.append(line[:400])
             if line.startswith(('SUN rows=','UI ')):break
         if identify(lines,target).get('role')=='unknown':
             port.write(b'STATUS\n');port.flush();end=time.monotonic()+1.5
             while time.monotonic()<end:
                 line=port.readline().decode('ascii',errors='replace').strip()
-                if line.startswith('STATUS '):lines.append(line[:400])
+                if line.startswith(('STATUS ','OTA ')):lines.append(line[:400])
                 if line.startswith('UI '):break
         self.value=identify(lines,target);self.probed=bool(self.value['firmware']);self.save()
         return self.value

@@ -63,4 +63,11 @@ device-connections.json
 gym-actions.json
 gym-status.json
 device-profile.json
+firmware-maintenance.json
+pedals.csv
+*-live-check.json
+/captures/
+/firmware/
+*.partial
+*.chunk
 device_profiles/build/

@@ -4,6 +4,7 @@
 #include <BLEServer.h>
 #include <BLESecurity.h>
 #include <esp_heap_caps.h>
+#define XIAO_DEVICE_PROFILE "desktop"
 #include "WifiLink.h"
 
 // Same authenticated GATT protocol as Nordic, implemented with the ESP32 core's
