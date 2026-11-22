@@ -48,6 +48,31 @@ not implement certified GymKit or NFC pairing. Start an Indoor Cycle workout and
 select the sensor in Watch Bluetooth settings. Depending on cached services,
 forgetting and pairing again may be needed after a firmware service change.
 
+## Apple Watch wheel-size setup
+
+Configure the paired sensor's wheel size before testing speed and distance:
+
+1. On the Watch, open **Settings → Bluetooth** and find **Gym Xiao** under
+   **Health Devices** if that section is shown.
+2. Tap **ⓘ**, then **Set Up Device / Wheel Size**; names vary with watchOS.
+3. Enter **2100 mm circumference** if a custom value is available. If the menu
+   lists tyre sizes such as inches, 650A or 700C, choose **700C**. Select
+   **23 mm / 23C** if a tyre width is requested. The common 700 × 23C preset is
+   approximately 2096 mm, close to the firmware's 2100 mm virtual wheel; broad
+   presets can differ slightly between receiving devices.
+4. Record a short **Indoor Cycle** workout and compare the receiver's speed and
+   distance with the XIAO. Check the saved workout summary too.
+
+This setting describes a **virtual wheel**, even on a folding bike with no road
+wheel. It is separate from **Ride Data → distance per pedal turn**, which must
+be calibrated against the bike's console. Do not enter metres per pedal turn as
+wheel circumference. An incorrect receiver wheel size scales speed/distance
+incorrectly; it does not change the cadence or power calculations.
+
+Wheel-size setup does not guarantee that Apple's native Indoor Cycle summary
+will display or save speed/distance. That integration remains unverified; see
+[ride-data validation](../device_profiles/gym/RIDE_METRICS.md).
+
 Only real sensor events feed the Watch. Demo Mode animates the display without
 fabricating workout events. Power returns to zero after no event for the greater
 of four seconds or three previous crank intervals. Two crank events are needed

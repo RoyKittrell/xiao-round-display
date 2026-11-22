@@ -39,6 +39,13 @@ See [device modules and installation](device_profiles/README.md),
 - Metric/imperial units, editable distance per turn and a fresh ride on every startup.
 - Display-only Demo Mode, persistent pedal logs and saved on-device settings.
 
+**Required Watch setup for speed/distance:** on Apple Watch, open **Settings →
+Bluetooth → Gym Xiao → ⓘ → Set Up Device / Wheel Size** (under Health Devices
+if shown). Set wheel circumference to **2100 mm**. If the menu offers tyre-size
+presets instead, choose **700C**, then **23 mm / 23C** if a width is requested.
+This is the firmware's virtual wheel, independent of the bike's metres-per-pedal-turn
+calibration. See [Watch setup and verification](docs/GYM.md#apple-watch-wheel-size-setup).
+
 **Power is an estimate**, using an adjustable-in-source heuristic rather than a
 calibrated torque measurement. This is standard Bluetooth sensor support, not
 certified Apple GymKit. Check [Gym wiring, model and validation](docs/GYM.md)

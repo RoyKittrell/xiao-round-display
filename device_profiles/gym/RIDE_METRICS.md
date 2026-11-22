@@ -38,8 +38,12 @@ Mechanical kJ are distinct from metabolic calories. HR/calories require a separa
 measurement source; no fabricated readings are displayed for them.
 
 Bluetooth exposes CSC wheel+crank data and CPS wheel+crank+accumulated energy.
-The wheel is virtual, with a fixed2100mm circumference. Set the Watch accessory's
-wheel size to2100mm if offered, otherwise displayed speed/distance can differ.
+The wheel is virtual, with a fixed2100mm circumference. Configure the Watch's
+paired sensor under **Settings → Bluetooth → Gym Xiao → ⓘ → Set Up Device /
+Wheel Size**: use **2100 mm circumference**, or **700C** with **23C** width if
+the menu offers tyre-size presets. See [the setup steps](../../docs/GYM.md#apple-watch-wheel-size-setup).
+Receiver presets can introduce a small scale difference; this setting is separate
+from per-bike metres-per-pedal-turn calibration.
 Crank event times use1/1024s; CSC wheel times1/1024s; CPS wheel times1/2048s.
 Ride resets do not rewind Bluetooth wheel/crank/energy counters. Those counters
 restart at firmware boot as ordinary accessory counters. Indoor Cycle handling of
