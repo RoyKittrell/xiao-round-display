@@ -59,13 +59,15 @@ TouchNavigation touchNavigation;
 TouchContact touchContact;
 TouchCoordinates touchCoordinates;
 TouchCalibration touchCalibration;
+ScreenOrientation screenOrientation;
+void printOrientation(){Serial.print("ORIENTATION turns=");Serial.println(screenOrientation.turns());}
 DisplayBusHealth displayBus;
 #if defined(CONFIG_IDF_TARGET_ESP32S3)
-const char* firmwareTag="esp32s3-public-r35-wifi-ota";
+const char* firmwareTag="esp32s3-public-r36-wifi-ota-rotation";
 #elif defined(ARDUINO_ARCH_ESP32)
-const char* firmwareTag="esp32c6-public-r34-wifi";
+const char* firmwareTag="esp32c6-public-r35-wifi-rotation";
 #else
-const char* firmwareTag="nrf54-public-r34";
+const char* firmwareTag="nrf54-public-r35-rotation";
 #endif
 volatile bool touchReportPending=true;
 void touchReportReady(){touchReportPending=true;}
@@ -312,7 +314,7 @@ void touchSample(bool down,int touchX,int touchY){
  else if(event.kind==TouchNavigation::Tap)sceneTap(event.x,event.y);
 }
 void startTouchCalibration(){
- watches.demo=false;selectScene(2);touchCalibration.begin();
+ watches.demo=false;selectScene(2);touchCalibration.begin(screenOrientation.turns());
  touchNavigation.sceneChanged();brightnessGesture.reset();
  firstFrame=true;Serial.println("CALIBRATION START: hold each gold dot, then lift");
 }
@@ -354,7 +356,8 @@ void input(){
  }
  if(displayBus.recoveryDue(millis())){recoverDisplayBus();packetReceived=false;contactPressed=false;}
  auto contact=touchContact.update(packetReceived,contactPressed,touchX,touchY,millis());
- auto mapped=touchCoordinates.map(contact.x,contact.y);
+ auto calibrated=touchCoordinates.map(contact.x,contact.y);
+ auto mapped=screenOrientation.touch(calibrated.x,calibrated.y);
  static bool lastTouchDown=false;
  if(traceTouch&&contact.down!=lastTouchDown){Serial.print(contact.down?"TOUCH DOWN raw=":"TOUCH UP raw=");Serial.print(contact.x);Serial.print(",");Serial.print(contact.y);Serial.print(" mapped=");Serial.print(mapped.x);Serial.print(",");Serial.print(mapped.y);Serial.print(" ms=");Serial.println(millis());}
  lastTouchDown=contact.down;
@@ -390,7 +393,7 @@ void input(){
 #if defined(ARDUINO_ARCH_ESP32)
  Serial.wifiStatus();
 #endif
- Serial.print("TOUCH MAP ");Serial.println(touchCoordinates.orientation);printDisplayBus();printClock();printLighting();printDisplaySchedule();Serial.print("BACKLIGHT PWM ");Serial.print(appliedPWM);Serial.println("/4095");printSpaceStatus();continue;}
+ printOrientation();Serial.print("TOUCH MAP ");Serial.println(touchCoordinates.orientation);printDisplayBus();printClock();printLighting();printDisplaySchedule();Serial.print("BACKLIGHT PWM ");Serial.print(appliedPWM);Serial.println("/4095");printSpaceStatus();continue;}
  if(c=='c'){startTouchCalibration();continue;}
  if(c=='+'||c=='-'){adjustBrightness(c=='+'?5:-5);continue;}
  if(c=='v'){lighting.overrideMode=AppearanceOverride((int(lighting.overrideMode)+1)%3);serviceLighting();printLighting();continue;}
@@ -595,6 +598,16 @@ void applyMenuControl(const SceneControl::Settings& next){
   }
 }
 void handleSunPacket(){
+ if(packet[0]=='O'){
+  uint8_t wanted=4;if(!ScreenOrientation::parse(packet,wanted)){Serial.println("ERR orientation packet");return;}
+  if(wanted<4&&touchCalibration.active()){Serial.println("ERR orientation calibration active");return;}
+  if(wanted<4&&screenOrientation.set(wanted)){
+   Board::saveRotation(wanted);lcd.setRotation(wanted);firstFrame=true;
+   touchNavigation.sceneChanged();brightnessGesture.reset();touchContact=TouchContact();
+  }
+  printOrientation();return;
+ }
+
 #if defined(ARDUINO_ARCH_ESP32)
  if(packet[0]=='N'&&packet[1]=='|'){
   bool ok=Serial.provisionWifi(packet);memset(packet,0,sizeof(packet));
@@ -717,7 +730,7 @@ void drawRegion(int left,int top,int right,int bottom){
  lcd.startWrite();lcdWindowFast(left,top,right,bottom);
  // The verified software SPI pin mapping, with direct GPIO writes for pixels.
  // P1.06=MOSI and P1.04=SCK. Keep clock low between bits (SPI mode 0).
- const uint16_t* pixels=cv.getBuffer();int drawingMode=mode;
+ const uint16_t* pixels=cv.getBuffer();int drawingMode=mode;uint8_t drawingRotation=screenOrientation.turns();
  for(int yy=top;yy<=bottom;yy++){
  for(int xx=left;xx<=right;xx++){
   int i=yy*240+xx;uint16_t word=pixels[i];
@@ -725,7 +738,7 @@ void drawRegion(int left,int top,int right,int bottom){
  }
  if((yy-top+1)%8==0&&yy<bottom){
   lcd.endWrite();accelerationFresh=acceleration();input();
-  if(mode!=drawingMode)return;
+  if(mode!=drawingMode||screenOrientation.turns()!=drawingRotation)return;
   lcd.startWrite();lcdWindowFast(left,yy+1,right,bottom);
  }
  }
@@ -733,10 +746,10 @@ void drawRegion(int left,int top,int right,int bottom){
 }
 #else
 void drawRegion(int left,int top,int right,int bottom){
- int drawingMode=mode;lcd.startWrite();lcd.setAddrWindow(left,top,right-left+1,bottom-top+1);
+ int drawingMode=mode;uint8_t drawingRotation=screenOrientation.turns();lcd.startWrite();lcd.setAddrWindow(left,top,right-left+1,bottom-top+1);
  for(int yy=top;yy<=bottom;yy++){
   lcd.writePixels(cv.getBuffer()+yy*240+left,right-left+1,true,false);
-  if((yy-top+1)%8==0&&yy<bottom){lcd.endWrite();input();if(mode!=drawingMode)return;lcd.startWrite();lcd.setAddrWindow(left,yy+1,right-left+1,bottom-yy);}
+  if((yy-top+1)%8==0&&yy<bottom){lcd.endWrite();input();if(mode!=drawingMode||screenOrientation.turns()!=drawingRotation)return;lcd.startWrite();lcd.setAddrWindow(left,yy+1,right-left+1,bottom-yy);}
  }
  lcd.endWrite();
 }
@@ -748,7 +761,7 @@ void serviceDisplayRecovery(){
  if(displaySleeping)return;
  uint32_t now=millis();
  if(!waitingForWake&&recoveryRow>=240&&now-lastRecovery>=3000){
-  lcd.restoreConfiguration();lcd.setRotation(0);
+  lcd.restoreConfiguration();lcd.setRotation(screenOrientation.turns());
   recoveryStarted=millis();lastRecovery=recoveryStarted;waitingForWake=true;
  }
  if(waitingForWake&&millis()-recoveryStarted>=150){
@@ -789,7 +802,7 @@ void serviceDisplaySchedule(){
    waitingForWake=false;recoveryRow=240;
    Serial.println("DISPLAY scheduled sleep");
   }else{
-   lcd.restoreConfiguration();lcd.setRotation(0);delay(150);lcd.sendCommand(GC9A01A_DISPON);
+   lcd.restoreConfiguration();lcd.setRotation(screenOrientation.turns());delay(150);lcd.sendCommand(GC9A01A_DISPON);
    waitingForWake=false;recoveryRow=240;lastRecovery=millis();firstFrame=true;mediaOwner=-1;scheduledWakeRepaint=true;
    if(mode==2)watches.enter(millis());
    if(mode==7){starPlayback.enter(millis());starRenderer.resetTrails();}
@@ -831,6 +844,7 @@ void setup(){
 #else
  touchCoordinates.orientation=Board::loadTouch();
 #endif
+ screenOrientation.set(Board::loadRotation());
  Board::beginDisplayBus();delay(20);
  attachInterrupt(digitalPinToInterrupt(PIN_D7),touchReportReady,FALLING);
 
@@ -842,7 +856,7 @@ void setup(){
 #if defined(ARDUINO_ARCH_ESP32)
  SPI.begin(D8,D9,D10,D1);
 #endif
- pinMode(PIN_D6,OUTPUT);Board::pwmBegin();serviceLighting();lcd.begin(16000000);lcd.setRotation(0);
+ pinMode(PIN_D6,OUTPUT);Board::pwmBegin();serviceLighting();lcd.begin(16000000);lcd.setRotation(screenOrientation.turns());
  if(displaySleeping){lcd.sendCommand(GC9A01A_DISPOFF);lcd.sendCommand(GC9A01A_SLPIN);}
  if(!cv.getBuffer()||!moonImage.getBuffer()||!textMask.getBuffer()
 #if !defined(ARDUINO_ARCH_ESP32)

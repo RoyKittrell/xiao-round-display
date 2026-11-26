@@ -27,6 +27,8 @@ constexpr uint32_t FrameIntervalMs=40;
 #endif
 inline uint8_t loadTouch(){Preferences p;if(!p.begin("xiao-display",true))return 0;auto v=p.getUChar("touch-map",0);p.end();return v<8?v:0;}
 inline void saveTouch(uint8_t v){Preferences p;if(p.begin("xiao-display",false)){p.putUChar("touch-map",v);p.end();}}
+inline uint8_t loadRotation(){Preferences p;if(!p.begin("xiao-display",true))return 0;auto v=p.getUChar("screen-turns",0);p.end();return v<4?v:0;}
+inline void saveRotation(uint8_t v){Preferences p;if(p.begin("xiao-display",false)){p.putUChar("screen-turns",v);p.end();}}
 inline void pwmBegin(){analogWriteResolution(PIN_D6,12);analogWriteFrequency(PIN_D6,2000);}
 inline void setupRadioAntenna(){
 #if defined(CONFIG_IDF_TARGET_ESP32C6)
@@ -44,6 +46,8 @@ constexpr bool Esp32C6=false;
 constexpr uint32_t FrameIntervalMs=40;
 inline uint8_t loadTouch(){return 0;}
 inline void saveTouch(uint8_t){}
+inline uint8_t loadRotation(){return 0;}
+inline void saveRotation(uint8_t){}
 inline void pwmBegin(){analogWriteResolution(12);analogWriteFrequency(2000);}
 inline void setupRadioAntenna(){}
 inline int pinLevel(uint8_t pin){return digitalRead(pin);}

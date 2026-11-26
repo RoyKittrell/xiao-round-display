@@ -44,3 +44,8 @@ the paired certificate-pinned TLS OTA receiver; never expose an unauthenticated
 updater, silently flash, erase NVS or change partitions. C6/Nordic OTA is disabled.
 See device_profiles/OTA.md for bootstrap, verification and recovery limits.
 See docs/HARDWARE.md and docs/WIFI.md for build and verification limits.
+
+Screen orientation is independent per device. Preserve capability gating,
+absolute idempotent requests, CRC checks and calibrated-touch transforms.
+Never replay relative quarter-turn actions on reconnect or silently reset
+calibration. Keep orientation-settings/status records out of Git.

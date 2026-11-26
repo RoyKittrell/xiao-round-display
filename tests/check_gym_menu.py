@@ -19,6 +19,20 @@ harness=r'''
   let firmwareMenu=delegate.menu.items.first{$0.title=="Firmware"}!.submenu!
   assert(!firmwareMenu.items.first{$0.title=="Update Firmware over Wi-Fi…"}!.isEnabled)
 
+  let unsupportedOrientation=delegate.menu.items.first{$0.title=="Screen Orientation"}!.submenu!
+  assert(unsupportedOrientation.items.count==2 && unsupportedOrientation.items.allSatisfy{!$0.isEnabled})
+  var rotating=delegate.hardware;rotating["rotation_supported"]=true;delegate.health["hardware"]=rotating
+  delegate.orientationState=["turns":0];delegate.rebuild()
+  let orientationMenu=delegate.menu.items.first{$0.title=="Screen Orientation"}!.submenu!
+  assert(orientationMenu.items.map{$0.title}==["Rotate 90° Left","Rotate 90° Right"])
+  delegate.rotateScreen(orientationMenu.items[1]);delegate.rotateScreen(orientationMenu.items[1]);delegate.rotateScreen(orientationMenu.items[0])
+  let rotationURL=delegate.deviceDataRoot.appendingPathComponent("orientation-settings.json")
+  assert(object(rotationURL)["turns"] as? Int==1 && object(rotationURL)["device_id"] as? String==gym)
+  let originalConnection=delegate.connectionSettings
+  delegate.connectionSettings=["device_id":desk,"selection_epoch":"another"]
+  delegate.rotateScreen(orientationMenu.items[1])
+  assert(!FileManager.default.fileExists(atPath:delegate.deviceDataRoot.appendingPathComponent("orientation-settings.json").path))
+  delegate.connectionSettings=originalConnection
   let deviceMenu=delegate.menu.items[0].submenu!
   assert(deviceMenu.items.contains{$0.title=="Device Settings…"})
   assert(!deviceMenu.items.contains{$0.title.contains("Rename")})

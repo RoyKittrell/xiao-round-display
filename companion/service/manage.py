@@ -67,8 +67,8 @@ def prepare_runtime():
 def build(python_path=None):
  staged=Path(tempfile.mkdtemp(prefix='xiao-helper-build-',dir='/tmp'))/(NAME+'.app');contents=staged/'Contents';macos=contents/'MacOS';macos.mkdir(parents=True,exist_ok=True)
  info={'CFBundleName':NAME,'CFBundleDisplayName':NAME,'CFBundleIdentifier':LABEL,
-       'CFBundleExecutable':NAME,'CFBundlePackageType':'APPL','CFBundleVersion':'31',
-       'CFBundleShortVersionString':'2.14.1','LSUIElement':True,
+       'CFBundleExecutable':NAME,'CFBundlePackageType':'APPL','CFBundleVersion':'32',
+       'CFBundleShortVersionString':'2.15.0','LSUIElement':True,
        'XIAOPythonPath':str(python_path or Path(sys.executable).absolute()),
        'NSBluetoothAlwaysUsageDescription':'Connects to your XIAO Round Display to send scene controls and live information without USB.',
        'NSLocationUsageDescription':'Uses your location once to set the local weather forecast on your XIAO display. The saved location is reused without continuous tracking.',
@@ -78,7 +78,7 @@ def build(python_path=None):
        'NSHumanReadableCopyright':"XIAO Round Display — USB display updater"}
  (contents/'Info.plist').write_bytes(plistlib.dumps(info))
  runtime=contents/'Resources/companion';runtime.mkdir(parents=True,exist_ok=True)
- for filename in ('display_bridge.py','codex_usage.py','sun_bridge.py','bambu_status.py','weather_status.py','helper_runtime.py','display_control.py','scenes.json','clock-faces.json','process_owner.py','display_transport.py','wifi_setup.py','wifi_transport.py','hardware_profile.py','device_registry.py','gym_control.py','multi_device.py','device_profiles.py','firmware_update.py','runtime_config.py'):
+ for filename in ('display_bridge.py','codex_usage.py','sun_bridge.py','bambu_status.py','weather_status.py','helper_runtime.py','display_control.py','scenes.json','clock-faces.json','process_owner.py','display_transport.py','wifi_setup.py','wifi_transport.py','hardware_profile.py','device_registry.py','gym_control.py','multi_device.py','device_profiles.py','firmware_update.py','screen_orientation.py','runtime_config.py'):
   shutil.copyfile(ROOT/'companion'/filename,runtime/filename)
  profiles=runtime/'device_profiles';profiles.mkdir()
  shutil.copyfile(ROOT/'device_profiles/catalog.json',profiles/'catalog.json')

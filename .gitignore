@@ -71,3 +71,8 @@ pedals.csv
 *.partial
 *.chunk
 device_profiles/build/
+
+# Device-specific screen orientation
+orientation-settings.json
+orientation-status.json
+orientation-*.tmp

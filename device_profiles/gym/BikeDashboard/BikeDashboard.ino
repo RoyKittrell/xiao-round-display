@@ -75,13 +75,13 @@ void record(const char *event, uint32_t timestamp, int level, uint32_t interval)
 }
 
 void status() {
-  hostLink.printf("STATUS firmware=bike-dashboard-r22 chip=%012llx pin=D2/GPIO3 level=%d closures=%lu transitions=%lu storage=%s full=%d bytes=%u debounce_us=%lu led_on=%d led_mode=%s wifi_supported=1 ble_supported=1 ble_ready=%d watch_csc=1 watch_power=1 gym_title=1 free_heap=%u max_alloc=%u\n",
+  hostLink.printf("STATUS firmware=bike-dashboard-r23 chip=%012llx pin=D2/GPIO3 level=%d closures=%lu transitions=%lu storage=%s full=%d bytes=%u debounce_us=%lu led_on=%d led_mode=%s wifi_supported=1 ble_supported=1 ble_ready=%d watch_csc=1 watch_power=1 gym_title=1 free_heap=%u max_alloc=%u\n",
     ESP.getEfuseMac(), digitalRead(SENSOR_PIN), (unsigned long)closures,
     (unsigned long)transitions, storageOK ? "OK" : "ERROR", logFull,
     storageOK ? (unsigned)logFile.size() : 0, (unsigned long)DEBOUNCE_US,
     digitalRead(LED_BUILTIN) == LOW, (!storageOK || logFull || queueDrops || !sensorTaskOK) ? "ERROR_FAST" : "RECORD_HEARTBEAT",
     hostLink.bluetoothReady(),ESP.getFreeHeap(),ESP.getMaxAllocHeap());
-  hostLink.bluetoothStatus();hostLink.cyclingStatus();hostLink.powerStatus();hostLink.wifiStatus();
+  orientationStatus();hostLink.bluetoothStatus();hostLink.cyclingStatus();hostLink.powerStatus();hostLink.wifiStatus();
 }
 
 void handleCommand() {
@@ -199,10 +199,13 @@ void wirelessCommands() {
     }
     if(c=='\n') {
       if(receivingProvision) {
-        bool ok=!commandOverflow&&hostLink.provisionWifi(provisionPacket);
+        if(!commandOverflow&&provisionPacket[0]=='O')orientationCommand(provisionPacket);
+        else{
+          bool ok=!commandOverflow&&hostLink.provisionWifi(provisionPacket);
+          hostLink.println(ok?"ACK N saved; restarting":"ERR WiFi setup rejected");
+          if(ok){if(logFile)logFile.flush();delay(200);ESP.restart();}
+        }
         memset(provisionPacket,0,sizeof(provisionPacket));provisionLength=0;receivingProvision=false;
-        hostLink.println(ok?"ACK N saved; restarting":"ERR WiFi setup rejected");
-        if(ok){if(logFile)logFile.flush();delay(200);ESP.restart();}
       }else if(commandOverflow){hostLink.println("ERROR command too long");command="";}
       else if(!command.isEmpty())handleCommand();
       commandOverflow=false;hostLink.endResponse();

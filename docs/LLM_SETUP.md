@@ -19,7 +19,10 @@ README.md, docs/SETUP.md, docs/PRIVACY.md and AGENTS.md before making changes.
    see whether they exist.
 5. Ask for civil UTC offset and whether they want an observer location. They may
    leave UTC/no observer. Explain that fixed offsets do not implement DST.
-6. Ask which scenes to include and whether to use carousel/hold. Use the menu
+6. Screen Orientation offers left/right quarter turns for the selected device.
+   Keep the matching firmware and helper together. Older firmware is disabled;
+   never send unsupported rotation packets or overwrite touch calibration.
+7. Ask which scenes to include and whether to use carousel/hold. Use the menu
    and Profiles; do not delete other scenes to implement a preference.
 
 ## Configure with the provided tools

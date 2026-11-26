@@ -16,7 +16,7 @@ class Privacy(unittest.TestCase):
 
     def test_saved_device_state_and_generated_directories_are_rejected(self):
         for name in ('device-names.json','device-catalog.json','device-connections.json',
-                     'gym-status.json','firmware-maintenance.json','device-profile.json',
+                     'gym-status.json','orientation-settings.json','orientation-status.json','firmware-maintenance.json','device-profile.json',
                      'devices/example/settings.json','build/application.bin','Example.app/Contents/file'):
             errors=audit.audit([ROOT/name],read_bytes=lambda _:b'{}')
             self.assertTrue(errors,name)

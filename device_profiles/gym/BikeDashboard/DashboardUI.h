@@ -10,6 +10,7 @@
 #include "BrightnessGesture.h"
 #include "Backlight.h"
 #include "TouchContact.h"
+#include "ScreenOrientation.h"
 
 Adafruit_GC9A01A lcd(D1, D3, -1);
 class GymCanvas:public GFXcanvas16 {
@@ -18,6 +19,8 @@ public:
   bool begin(){buffer=(uint16_t*)ps_calloc(240*240,sizeof(uint16_t));buffer_owned=true;return buffer!=nullptr;}
 };
 GymCanvas canvas;
+ScreenOrientation screenOrientation;
+
 uint16_t *previousFrame=nullptr;
 uint8_t *edgeMask=nullptr;
 uint8_t edgeStrength=0;
@@ -124,6 +127,12 @@ void setResistance(int value) {
   char event[24];snprintf(event,sizeof(event),"RESISTANCE_%d",resistance);
   record(event,micros(),digitalRead(SENSOR_PIN),0);
 }
+void orientationStatus(){hostLink.printf("ORIENTATION turns=%u\n",unsigned(screenOrientation.turns()));}
+void orientationCommand(const char* packet){
+ uint8_t value=4;if(!ScreenOrientation::parse(packet,value)){hostLink.println("ERR orientation packet");return;}
+ if(value<4&&screenOrientation.set(value)){Preferences p;if(p.begin("xiao-display",false)){p.putUChar("screen-turns",value);p.end();}lcd.setRotation(value);firstFrame=true;touchHeld=false;screenTouch=TouchContact();brightnessGesture.reset();}
+ orientationStatus();
+}
 void setUnits(bool imperial){imperialUnits=imperial;Preferences p;if(p.begin("bike-ui",false)){p.putBool("imperial",imperial);p.end();}}
 void rideStatus(){
   auto& ride=hostLink.ride();auto& d=ride.data();
@@ -163,6 +172,7 @@ void touchService() {
     down=p[0]==1;x=p[2];y=p[4];
     if(touchMap&4){int t=x;x=y;y=t;}
     if(touchMap&1)x=239-x;if(touchMap&2)y=239-y;
+    auto mapped=screenOrientation.touch(x,y);x=mapped.x;y=mapped.y;
     touchX=x;touchY=y;
   } else {++touchFailures;touchOK=false;}
   auto contact=screenTouch.update(good,down,x,y,now);
@@ -203,7 +213,7 @@ void uiSetup() {
   bool demoOnce=false;
   if(p.begin("bike-ui",false)){demoOnce=p.getBool("demo",false);p.end();}
   if(demoOnce)setDemo(true);
-  if(p.begin("xiao-display",true)){touchMap=p.getUChar("touch-map",0);p.end();}
+  if(p.begin("xiao-display",true)){touchMap=p.getUChar("touch-map",0);screenOrientation.set(p.getUChar("screen-turns",0));p.end();}
   previousFrame=(uint16_t*)ps_malloc(240*240*2);
   edgeMask=(uint8_t*)ps_malloc(240*240);
   if(!canvas.getBuffer()||!previousFrame||!edgeMask)return;
@@ -218,7 +228,7 @@ void uiSetup() {
   analogWrite(D6,0);
   screenBacklight.off(millis());
   // 40MHz is this driver's standard ESP32 SPI setting.
-  lcd.begin(40000000);lcd.setRotation(0);lcd.fillScreen(UI_BG);
+  lcd.begin(40000000);lcd.setRotation(screenOrientation.turns());lcd.fillScreen(UI_BG);
   displayReady=true;fpsAt=millis();
 }
 void sendChangedStripes() {

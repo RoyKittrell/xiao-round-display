@@ -128,6 +128,25 @@ extension AppDelegate {
             prepareMenuIfNeeded()
         }catch{showError(error.localizedDescription)}
     }
+    func addOrientationMenu(){
+        guard ["desktop","gym"].contains(selectedRole) else{return}
+        let orientation=submenu("Screen Orientation")
+        let ready=connected && hardware["rotation_supported"] as? Bool == true && !wifiSetupRunning
+        for (label,step) in [("Rotate 90° Left",-1),("Rotate 90° Right",1)] {
+            let entry=add(label,to:orientation,action:#selector(rotateScreen(_:)),tag:step,enabled:ready)
+            entry.representedObject=["target":selectedDeviceId,"selection":selectionEpoch]
+            entry.toolTip=ready ? "Rotates this display and its touch controls":"Requires updated screen-orientation firmware"
+        }
+    }
+    @objc func rotateScreen(_ sender:NSMenuItem){
+        guard connected,hardware["rotation_supported"] as? Bool == true,!wifiSetupRunning,
+              let request=sender.representedObject as? [String:String],request["target"]==selectedDeviceId,request["selection"]==selectionEpoch else{return}
+        let url=deviceDataRoot.appendingPathComponent("orientation-settings.json")
+        let saved=object(url)
+        let prior=(saved["device_id"] as? String==selectedDeviceId ? saved["turns"] as? Int:nil) ?? orientationState["turns"] as? Int ?? 0
+        let turns=(prior+sender.tag+4)%4
+        do{try writePrivate(["device_id":selectedDeviceId,"turns":turns,"token":UUID().uuidString],to:url)}catch{showError(error.localizedDescription)}
+    }
     func addFirmwareMenu(){
         guard ["desktop","gym"].contains(selectedRole) else{return}
         let firmware=submenu("Firmware")

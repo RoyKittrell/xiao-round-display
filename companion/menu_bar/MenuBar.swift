@@ -107,6 +107,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     var menuActivity:NSObjectProtocol?
     var connectionSettings:[String:String]=[:],bluetoothScanRunning=false,wifiSetupRunning=false
     let connectionURL=dataRoot.appendingPathComponent("display-connection.json")
+    var orientationState:[String:Any]=[:]
     var catalogState:[String:Any]=[:],namesState:[String:Any]=[:],gymState:[String:Any]=[:]
     var gymSliders:[GymSliderBox]=[],gymDesired:[String:Any]=[:],gymPendingValues:[String:Any]=[:]
     var gymSendWork:DispatchWorkItem?,gymPendingToken:String?,gymPendingAt=Date.distantPast
@@ -217,19 +218,19 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     func pollState(){
         guard !stateReadPending,!quitting else{return};stateReadPending=true
         let revisionWhenRequested=prefs.revision,deviceWhenRequested=selectedDeviceId,epochWhenRequested=selectionEpoch
-        let prefsPath=prefsURL,statusPath=statusURL,healthPath=healthURL,gymPath=deviceDataRoot.appendingPathComponent("gym-status.json")
+        let prefsPath=prefsURL,statusPath=statusURL,healthPath=healthURL,gymPath=deviceDataRoot.appendingPathComponent("gym-status.json"),orientationPath=deviceDataRoot.appendingPathComponent("orientation-status.json")
         stateQueue.async{[weak self] in
             let reader=JSONDecoder();reader.keyDecodingStrategy = .convertFromSnakeCase
             let saved=(try? Data(contentsOf:prefsPath)).flatMap{try? reader.decode(Preferences.self,from:$0)}
             let deviceState=object(statusPath),workerState=object(healthPath)
-            let catalog=object(dataRoot.appendingPathComponent("device-catalog.json")),names=object(dataRoot.appendingPathComponent("device-names.json")),gym=object(gymPath)
+            let catalog=object(dataRoot.appendingPathComponent("device-catalog.json")),names=object(dataRoot.appendingPathComponent("device-names.json")),gym=object(gymPath),orientation=object(orientationPath)
             DispatchQueue.main.async{
                 guard let self=self else{return};self.stateReadPending=false
                 guard self.selectedDeviceId==deviceWhenRequested,self.selectionEpoch==epochWhenRequested else{return}
                 // A slow read must never overwrite a more recent checkbox,
                 // profile or slider action performed while it was in flight.
                 if self.prefs.revision==revisionWhenRequested,let saved=saved{self.prefs=saved}
-                self.device=deviceState;self.health=workerState;self.catalogState=catalog;self.namesState=names;self.gymState=gym;self.updateGymControls()
+                self.device=deviceState;self.health=workerState;self.catalogState=catalog;self.namesState=names;self.gymState=gym;self.orientationState=orientation;self.updateGymControls()
                 self.carouselChecklist?.update(mask:self.prefs.enabledMask);self.clockChecklist?.update(mask:self.prefs.includedClocks);self.updateTip()
                 // Keep navigation stable: source-age labels are snapshots on opening.
                 if self.menuIsOpen{self.updateBrightnessFeedback()}
@@ -240,7 +241,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     func load(){
         if let data=try? Data(contentsOf:prefsURL),let value=try? decoder.decode(Preferences.self,from:data){prefs=value}
         else if selectedRole=="desktop",let data=try? Data(contentsOf:dataRoot.appendingPathComponent("display-preferences.json")),let value=try? decoder.decode(Preferences.self,from:data){prefs=value}
-        device=object(statusURL);health=object(healthURL)
+        device=object(statusURL);health=object(healthURL);orientationState=object(deviceDataRoot.appendingPathComponent("orientation-status.json"))
         carouselChecklist?.update(mask:prefs.enabledMask)
         clockChecklist?.update(mask:prefs.includedClocks)
     }
@@ -257,7 +258,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
         [String(prefs.revision),String(currentScene),String(connected),String(actualNight),
          String(device["sleeping"] as? Int ?? -1),String(device["revision"] as? UInt32 ?? 0),
          String(device["day_brightness"] as? Int ?? -1),String(device["night_brightness"] as? Int ?? -1),
-         device["error"] as? String ?? "",String(profileMenuGeneration),selectedDeviceId,selectionEpoch,catalogSignature,selectedRole,String(hardware["ota_supported"] as? Bool ?? false),String(hardware["watch_csc"] as? Bool ?? false),String(gymCurrent["watch_streaming"] as? Bool ?? false),String(gymCurrent["pulses_per_revolution"] as? Int ?? 1),String(gymCurrent["ready"] as? Bool ?? false),String(gymCurrent["demo"] as? Bool ?? false),gymCurrent["units"] as? String ?? "",String(gymCurrent["distance_mm"] as? Int ?? 5000),connectionSettings["mode"] ?? "usb",connectionSettings["bluetooth_id"] ?? "",hardware["model"] as? String ?? "",String(wifiFirmware),String(hardware["control_version"] as? Int ?? 2),String(bluetoothScanRunning),String(wifiSetupRunning),connectionSettings["wifi_host"] ?? "",String(weatherLocationBusy),weatherPlace?.city ?? ""].joined(separator:"|")
+         device["error"] as? String ?? "",String(profileMenuGeneration),selectedDeviceId,selectionEpoch,catalogSignature,selectedRole,String(hardware["rotation_supported"] as? Bool ?? false),String(hardware["ota_supported"] as? Bool ?? false),String(hardware["watch_csc"] as? Bool ?? false),String(gymCurrent["watch_streaming"] as? Bool ?? false),String(gymCurrent["pulses_per_revolution"] as? Int ?? 1),String(gymCurrent["ready"] as? Bool ?? false),String(gymCurrent["demo"] as? Bool ?? false),gymCurrent["units"] as? String ?? "",String(gymCurrent["distance_mm"] as? Int ?? 5000),connectionSettings["mode"] ?? "usb",connectionSettings["bluetooth_id"] ?? "",hardware["model"] as? String ?? "",String(wifiFirmware),String(hardware["control_version"] as? Int ?? 2),String(bluetoothScanRunning),String(wifiSetupRunning),connectionSettings["wifi_host"] ?? "",String(weatherLocationBusy),weatherPlace?.city ?? ""].joined(separator:"|")
     }
     func prepareMenuIfNeeded(){if !menuIsOpen && menuSignature != lastMenuSignature{rebuild()}}
     func menuWillOpen(_ menu:NSMenu){
@@ -283,7 +284,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
     }
     func submenu(_ title:String)->NSMenu{let m=NSMenu();m.autoenablesItems=false;add(title).submenu=m;return m}
     func rebuild(){
-        menu.removeAllItems();addDevicePicker();addFirmwareMenu()
+        menu.removeAllItems();addDevicePicker();addFirmwareMenu();addOrientationMenu()
         if selectedRole=="gym"{addGymMenus();lastMenuSignature=menuSignature;return}
         if selectedRole != "desktop" {
             add(connected ? "Identifying device…":"Selected device disconnected",enabled:false)
@@ -602,7 +603,7 @@ final class AppDelegate:NSObject,NSApplicationDelegate,NSMenuDelegate {
 }
 @main struct HelperMain {
     static func main(){
-        if CommandLine.arguments.contains("--version"){print("XIAO Display Helper 2.14.1");return}
+        if CommandLine.arguments.contains("--version"){print("XIAO Display Helper 2.15.0");return}
         let app=NSApplication.shared
         let delegate=AppDelegate();app.delegate=delegate;withExtendedLifetime(delegate){app.run()}
     }

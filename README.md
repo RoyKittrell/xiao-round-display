@@ -68,7 +68,10 @@ identify its contacts.
 
 The menu bar app provides scene selection, a persistent carousel checklist with
 All/None/mixed states, carousel/hold/interval controls, named Profiles, appearance,
-brightness and screen-power controls. Profiles contain settings, not credentials.
+brightness and screen-power controls. **Screen Orientation → Rotate 90° Left /
+Right** turns the selected display and its touch coordinates, independently of
+other connected boards. Rotation needs matching updated firmware.
+Profiles contain settings, not credentials.
 All scenes remain in source when excluded from the carousel. Retired modules
 are preserved separately in `optional_assets/`.
 

@@ -1,5 +1,6 @@
 #pragma once
 #include <stdint.h>
+#include "ScreenOrientation.h"
 
 struct TouchPoint {int x,y;};
 struct TouchCoordinates {
@@ -13,7 +14,7 @@ struct TouchCoordinates {
 };
 class TouchCalibration {
  bool running=false,held=false,captured=false,releasing=false;
- uint8_t step=0;
+ uint8_t step=0,screenTurns=0;
  uint32_t heldAt=0,releaseAt=0;
  int sumX=0,sumY=0,samples=0;
  TouchPoint observed[4]={};
@@ -29,7 +30,7 @@ class TouchCalibration {
   return points[index%4];
  }
  TouchPoint rawPoint(int index) const{return observed[index%4];}
- void begin(){running=true;held=captured=releasing=false;step=0;samples=sumX=sumY=0;error=0;}
+ void begin(uint8_t turns=0){screenTurns=turns&3;running=true;held=captured=releasing=false;step=0;samples=sumX=sumY=0;error=0;}
  void cancel(){running=false;}
  Event update(bool pressed,int x,int y,uint32_t now){
   if(!running)return None;
@@ -52,7 +53,7 @@ class TouchCalibration {
    for(uint8_t candidate=0;candidate<8;candidate++){
     TouchCoordinates mapping;mapping.orientation=candidate;int score=0;
     for(int i=0;i<4;i++){
-     auto p=mapping.map(observed[i].x,observed[i].y),t=target(i);
+     auto p=mapping.map(observed[i].x,observed[i].y);auto logical=target(i);auto t=ScreenOrientation::toPanel(logical.x,logical.y,screenTurns);
      int dx=p.x-t.x,dy=p.y-t.y;score+=dx*dx+dy*dy;
     }
     if(score<best){best=score;choice=candidate;}

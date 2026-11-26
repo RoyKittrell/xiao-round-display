@@ -20,6 +20,8 @@ def identify(lines,endpoint):
             if match:firmware=match[1];gym_chip=bytes.fromhex(match[2])[::-1].hex();gym_status=line
     ota={}
     for line in lines:
+        if re.fullmatch(r"ORIENTATION turns=[0-3]",line):ota["rotation_supported"]=True
+    for line in lines:
         if line.startswith('OTA '):
             f=dict(re.findall(r'([a-z_]+)=([^\s]+)',line))
             ota['ota_supported']=f.get('supported')=='1'
@@ -63,13 +65,13 @@ class HardwareProfile:
         port.write(b'?\n');port.flush();end=time.monotonic()+.6;lines=[]
         while time.monotonic()<end:
             line=port.readline().decode('ascii',errors='replace').strip()
-            if line.startswith(('FIRMWARE ','WIFI ','STATUS ','OTA ')):lines.append(line[:400])
+            if line.startswith(('FIRMWARE ','WIFI ','STATUS ','OTA ','ORIENTATION ')):lines.append(line[:400])
             if line.startswith(('SUN rows=','UI ')):break
         if identify(lines,target).get('role')=='unknown':
             port.write(b'STATUS\n');port.flush();end=time.monotonic()+1.5
             while time.monotonic()<end:
                 line=port.readline().decode('ascii',errors='replace').strip()
-                if line.startswith(('STATUS ','OTA ')):lines.append(line[:400])
+                if line.startswith(('STATUS ','OTA ','ORIENTATION ')):lines.append(line[:400])
                 if line.startswith('UI '):break
         self.value=identify(lines,target);self.probed=bool(self.value['firmware']);self.save()
         return self.value

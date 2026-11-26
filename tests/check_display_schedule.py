@@ -17,6 +17,8 @@ preamble=r'''
 #include <vector>
 #include <algorithm>
 #include "DisplaySchedule.h"
+#include "ScreenOrientation.h"
+ScreenOrientation screenOrientation;
 #include "SceneControl.h"
 #include "GameOfLife.h"
 #include "Backlight.h"
@@ -27,7 +29,7 @@ uint32_t nowMs=0;uint32_t millis(){return nowMs;}uint32_t micros(){return nowMs*
 constexpr uint8_t GC9A01A_DISPOFF=0x28,GC9A01A_DISPON=0x29,GC9A01A_SLPIN=0x10,PIN_D6=6;
 int hardwarePWM=-1;void analogWrite(int,int pwm){hardwarePWM=pwm;}
 struct FakeSerial {template<class T>void print(T){}template<class T>void println(T){};} Serial;
-struct FakeLCD {std::vector<int> commands;int restores=0;void sendCommand(int c){commands.push_back(c);}void restoreConfiguration(){restores++;}void setRotation(int){};} lcd;
+struct FakeLCD {std::vector<int> commands;int restores=0,rotation=0;void sendCommand(int c){commands.push_back(c);}void restoreConfiguration(){restores++;}void setRotation(int value){rotation=value;};} lcd;
 struct TouchContact{};TouchContact touchContact;
 struct Navigation {void sceneChanged(){}} touchNavigation;
 struct Gesture {void reset(){}bool active(){return false;}} brightnessGesture;
@@ -46,7 +48,7 @@ void printLighting(){}void watchSelectionChanged(){selectionCount++;mediaOwner=-
 '''
 tests=r'''
 void reset(uint32_t seconds=0){
- nowMs=0;clockSeconds=seconds;usbPower=UsbPowerState();halfPastRotation=HalfPastFaceRotation();sceneRotation=SceneRotation();sceneControl=SceneControl();life=GameOfLife();calibrating=false;
+ screenOrientation=ScreenOrientation();nowMs=0;clockSeconds=seconds;usbPower=UsbPowerState();halfPastRotation=HalfPastFaceRotation();sceneRotation=SceneRotation();sceneControl=SceneControl();life=GameOfLife();calibrating=false;
  watches=WatchCollection();lighting=DisplayLighting();lighting.dayBrightness=80;lighting.nightBrightness=25;backlight=Backlight();
  lcd=FakeLCD();starPlayback=Playback();starRenderer=Renderer();firstFrame=false;displaySleeping=scheduledWakeRepaint=waitingForWake=false;
  mode=2;mediaOwner=2;recoveryRow=240;lastRecovery=recoveryStarted=brightnessReportAt=0;
@@ -85,6 +87,12 @@ int main(){
  firstFrame=false;scheduledWakeRepaint=false;
  for(int i=0;i<100;i++){nowMs+=10;serviceLighting();}assert(hardwarePWM>0);
  assert(lighting.dayBrightness==80&&lighting.nightBrightness==25);
+ // Every nonzero orientation survives the actual wake and periodic recovery paths.
+ for(int turns=1;turns<4;turns++){
+  reset(3*3600);screenOrientation.set(turns);power(true);serviceDisplaySchedule();assert(displaySleeping);
+  clockSeconds=25200;power(true);serviceDisplaySchedule();assert(lcd.rotation==turns);
+  nowMs+=3001;serviceDisplayRecovery();assert(lcd.rotation==turns);
+ }
  // Battery/USB hot-plug at night. Keep scene and pause/resume stars, no repeated commands.
  reset(3*3600);mode=7;power(false);serviceDisplaySchedule();assert(!displaySleeping);
  power(true);serviceDisplaySchedule();assert(displaySleeping&&starPlayback.left==1);

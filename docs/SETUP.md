@@ -250,3 +250,20 @@ than silently fetching a developer’s home forecast. Open-Meteo weather data is
 attributed under CC BY 4.0 in the app. Centre taps toggle the 12/24-hour rain ring.
 The weather location does not silently change the fixed civil clock offset;
 configure that separately when moving between timezones.
+
+## 11. Screen orientation
+
+With helper2.15.0 and matching orientation-capable firmware, select the intended
+XIAO in **Device**, then use **Screen Orientation → Rotate 90° Left** or
+**Rotate 90° Right**. Each click moves one quarter turn; four clicks return to
+the original orientation. The setting applies to the whole display, including
+scene controls, brightness gestures and calibration targets. Other XIAOs keep
+their own orientation and continue receiving data.
+
+The helper detects support from the running firmware. Older or disconnected
+boards have disabled rotation items until updated/reconnected. This release uses
+Desktop S3 public-r36, Desktop C6/Nordic public-r35 and Gym r23.
+
+ESP32 saves rotation in NVS. Nordic restores its saved absolute orientation when
+its helper reconnects; without the helper it starts at the original orientation
+after a reboot. Rotation settings remain separate from touch calibration.

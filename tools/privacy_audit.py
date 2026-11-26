@@ -14,7 +14,7 @@ SYNTHETIC_MACS={'00:11:22:33:44:55','aa:bb:cc:dd:ee:ff'}
 
 def audit(paths, read_bytes=None):
     errors=[]
-    forbidden_names={'settings.json','display-profiles.json','display-preferences.json','control-status.json','helper-status.json','display-connection.json','bluetooth-status.json','hardware-status.json','weather-location.json','wifi-setup-status.json','display-pairings.json','device-catalog.json','device-connections.json','device-names.json','gym-actions.json','gym-status.json','device-profile.json','firmware-maintenance.json','pedals.csv'}
+    forbidden_names={'settings.json','display-profiles.json','display-preferences.json','control-status.json','helper-status.json','display-connection.json','bluetooth-status.json','hardware-status.json','weather-location.json','wifi-setup-status.json','display-pairings.json','device-catalog.json','device-connections.json','device-names.json','gym-actions.json','gym-status.json','device-profile.json','firmware-maintenance.json','pedals.csv','orientation-settings.json','orientation-status.json'}
     patterns=[r'/Users/[A-Za-z0-9_.-]+/',r'/home/[A-Za-z0-9_.-]+/',
               r'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----',
               r'gh[pousr]_[A-Za-z0-9]{30,}',r'github_pat_[A-Za-z0-9_]{30,}',

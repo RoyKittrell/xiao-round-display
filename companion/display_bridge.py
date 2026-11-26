@@ -19,6 +19,7 @@ from hardware_profile import HardwareProfile
 from device_registry import DeviceRegistry,Selection,SelectionChanged
 from gym_control import GymControl
 from display_control import Control
+from screen_orientation import Orientation
 from process_owner import check_owner,stop_orphan
 from display_transport import open_port,endpoint,is_connected,close_bluetooth,set_selection_guard
 from sources import build as build_sources
@@ -58,7 +59,7 @@ def send_printer(value,device=None,port=None):
             opened.reset_input_buffer();sync_clock(opened);send_printer(value,port=opened)
 
 class Dispatcher:
-    def __init__(self,registry,device,select=False,control=None):self.registry=registry;self.device=device;self.select=select;self.control=control;self.hardware=HardwareProfile(state_root());self.binding=None
+    def __init__(self,registry,device,select=False,control=None):self.registry=registry;self.device=device;self.select=select;self.control=control;self.hardware=HardwareProfile(state_root());self.binding=None;self.orientation=Orientation(state_root())
     def identify(self,binding):
         with usb_lock(),open_port(self.device,115200,timeout=.15,write_timeout=5) as port:
             port.reset_input_buffer();profile=self.hardware.ensure(port,self.device)
@@ -73,7 +74,8 @@ class Dispatcher:
             data,version=state.read()
             if state.source.encode and data is not None and (force or time.monotonic()>=state.next_send):due.append((state,data,version))
         control_due=self.control is not None and self.control.due(force)
-        if not due and not control_due:return
+        orientation_due=self.binding is not None and self.hardware.value.get("rotation_supported",False) and self.orientation.due()
+        if not due and not control_due and not orientation_due:return
         if port is None:
             with usb_lock(),open_port(self.device,115200,timeout=.2,write_timeout=5) as opened:
                 opened.reset_input_buffer();profile=self.hardware.ensure(opened,self.device)
@@ -83,11 +85,13 @@ class Dispatcher:
                 if control_due:
                     result=self.control.send(opened)
                     if result:self.hardware.observe_boot(result.get("boot_id"))
+                if orientation_due:self.orientation.service(opened,self.binding)
                 self._packets(opened,due)
         else:
             if control_due:
                 result=self.control.send(port)
                 if result:self.hardware.observe_boot(result.get("boot_id"))
+            if orientation_due:self.orientation.service(port,self.binding)
             self._packets(port,due)
     def _packets(self,port,due):
         if self.hardware.value.get("role")!="desktop":return
@@ -193,7 +197,7 @@ def main():
                             prepare_preferences(ROOT,binding.id,'desktop')
                             registry=Registry(build_sources(ROOT));registry.start();sources_started=True
                             control=Control(workroot);dispatcher.registry=registry;dispatcher.control=control
-                        connected=True
+                        connected=True;dispatcher.orientation.reconnect()
                         if control:control.reconnect()
                         registry.reconnect()
                         if profile.get('role')=='gym':gym.begin_session(binding)
@@ -202,8 +206,11 @@ def main():
                         registry.connected.set();dispatcher.small();dispatcher.images()
                     elif role=='gym':
                         registry.connected.clear()
-                        if gym.due(binding):
-                            with usb_lock(),open_port(selected,115200,timeout=.15,write_timeout=3) as port:gym.service(port,binding)
+                        rotation_due=dispatcher.hardware.value.get('rotation_supported',False) and dispatcher.orientation.due()
+                        if gym.due(binding) or rotation_due:
+                            with usb_lock(),open_port(selected,115200,timeout=.15,write_timeout=3) as port:
+                                if gym.due(binding):gym.service(port,binding)
+                                if rotation_due:dispatcher.orientation.service(port,binding)
                     if time.monotonic()>=health_due:
                         health(registry,selected,dispatcher.hardware.value,binding);health_due=time.monotonic()+1
                 except (OSError,TimeoutError,ValueError) as error:

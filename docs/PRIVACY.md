@@ -13,6 +13,7 @@ Local state is in `~/Library/Application Support/XIAO Display Helper/`:
 | display-profiles.json | Named settings snapshots |
 | device-catalog.json, device-connections.json, device-names.json | Remembered boards, per-device connection choices and local aliases |
 | devices/ | Per-device preferences, telemetry, operational logs and private firmware recovery copies |
+| orientation-settings.json, orientation-status.json | Per-device rotation preference and acknowledgement |
 | firmware-maintenance.json, device-profile.json | Local update coordination and verification state |
 | gym-actions.json, gym-status.json | Targeted Gym settings requests and acknowledged values |
 | display-connection.json | Locally chosen transport and macOS Bluetooth device UUID |

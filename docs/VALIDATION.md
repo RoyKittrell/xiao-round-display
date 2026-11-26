@@ -1,10 +1,10 @@
 # Validation scope
 
-The public Desktop r35 (S3) / r34 (C6/Nordic) source is a blank template. It has not been installed with a new
+The public Desktop r36 (S3) / r35 (C6/Nordic) source is a blank template. It has not been installed with a new
 owner’s printer/account/network settings. No configured app bundle or captured
 firmware image is published.
 
-## Helper 2.14.1, Wi-Fi updates and device-purpose modules
+## Helper 2.15.0, screen orientation and device-purpose modules
 
 - Both public ESP32-S3 purpose modules compile with Arduino ESP32 core 3.3.12;
   the native helper stages and signs locally. No configured binary is committed.
@@ -19,6 +19,22 @@ firmware image is published.
   heuristic watt estimate calibrated. C6/Nordic purpose switching is unavailable.
 - Existing public default/configuration, source opt-in, astronomy, renderer,
   transport, privacy and native menu checks remain part of the release suite.
+
+## Screen-orientation coverage
+
+- Shared firmware CRC parser, strict bounds and full-screen coordinate inverses
+  run under ASan/UBSan. Calibration is checked at every rotation with all eight
+  supported calibration transforms. Touch mapping remains separate from the
+  display orientation.
+- Worker tests cover per-device settings, idempotent absolute requests,
+  reconnect restoration and refusing another device's settings. Native menu
+  tests exercise the two actions, rapid left/right clicks and stale-target
+  callbacks; older firmware keeps both actions disabled.
+- Originating S3 and C6 firmware acknowledged right/left/wrap/restore requests
+  through independent live helper workers. Their original orientations were
+  restored after testing. Visual rotated-touch QC remains an owner check.
+- S3 Desktop/Gym, C6 Desktop and Nordic Desktop public builds are compiled
+  separately. Gym/Nordic rotation has no new physical-hardware claim.
 
 ## Firmware-update and ride-data coverage
 
